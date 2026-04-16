@@ -1,13 +1,13 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { AuthGuard } from '../auth/auth.guard';
-import * as currentUserDecorator from '../auth/current-user.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import * as currentUserDecorator from '../auth/decorators/current-user.decorator';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { ServicesService } from './services.service';
 import { Patch } from '@nestjs/common';
 import { AssignWorkerDto } from './dto/assign-worker.dto';
 import { UpdateServiceStatusDto } from './dto/update-service-status.dto';
 
-@UseGuards(AuthGuard)
+@UseGuards(JwtAuthGuard)
 @Controller('services')
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}

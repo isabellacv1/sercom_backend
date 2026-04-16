@@ -14,7 +14,7 @@ type AuthenticatedRequest = Request & {
 };
 
 @Injectable()
-export class AuthGuard implements CanActivate {
+export class JwtAuthGuard implements CanActivate {
   private readonly jwks = createRemoteJWKSet(
     new URL(`${process.env.SUPABASE_URL}/auth/v1/keys`),
   );
