@@ -1,35 +1,71 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
-import { CurrentUser } from '../auth/current-user.decorator';
+import * as currentUserDecorator from '../auth/current-user.decorator';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { ServicesService } from './services.service';
-
-type JwtUser = {
-  sub: string;
-  email?: string;
-  role?: string;
-};
+import { Patch } from '@nestjs/common';
+import { AssignWorkerDto } from './dto/assign-worker.dto';
+import { UpdateServiceStatusDto } from './dto/update-service-status.dto';
 
 @UseGuards(AuthGuard)
 @Controller('services')
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
 
+  @Patch(':id/assign-worker')
+  assignWorker(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() dto: AssignWorkerDto,
+  ) {
+    return this.servicesService.assignWorker(user.sub, id, dto.worker_id);
+  }
+
+  @Patch(':id/status')
+  updateStatus(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateServiceStatusDto,
+  ) {
+    return this.servicesService.updateStatus(user.sub, id, dto.status);
+  }
+
+  @Get(':id/status-history')
+  findStatusHistory(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.servicesService.findStatusHistory(user.sub, id);
+  }
+
   @Post()
   create(
-    @CurrentUser() user: JwtUser,
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
     @Body() createServiceDto: CreateServiceDto,
   ) {
     return this.servicesService.create(user.sub, createServiceDto);
   }
 
   @Get('me')
-  findMine(@CurrentUser() user: JwtUser) {
+  findMine(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+  ) {
     return this.servicesService.findMine(user.sub);
   }
 
   @Get('me/:id')
-  findOneMine(@CurrentUser() user: JwtUser, @Param('id') id: string) {
+  findOneMine(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
     return this.servicesService.findOneMine(user.sub, id);
+  }
+
+  @Get(':id/candidate-workers')
+  findCandidateWorkers(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.servicesService.findCandidateWorkers(user.sub, id);
   }
 }

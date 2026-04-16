@@ -1,7 +1,5 @@
 import {
   IsDateString,
-  IsLatitude,
-  IsLongitude,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -10,6 +8,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class CreateServiceDto {
   @IsUUID()
@@ -34,19 +33,23 @@ export class CreateServiceDto {
   city?: string;
 
   @IsOptional()
-  @IsLatitude()
+  @Type(() => Number)
+  @IsNumber()
   latitude?: number;
 
   @IsOptional()
-  @IsLongitude()
+  @Type(() => Number)
+  @IsNumber()
   longitude?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   budget_min?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   budget_max?: number;
