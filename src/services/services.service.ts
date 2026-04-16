@@ -258,7 +258,12 @@ export class ServicesService {
         scheduled_at: dto.scheduled_at ?? null,
         status: 'requested',
       })
-      .select()
+      .select(
+        `
+      *,
+      category:service_categories(id, name, description, icon)
+    `,
+      )
       .single();
 
     const data = createResponse.data;
@@ -283,7 +288,14 @@ export class ServicesService {
       throw new InternalServerErrorException(historyError.message);
     }
 
-    return data;
+    const candidateWorkers = await this.findCandidateWorkers(clientId, data.id);
+
+    return {
+      message: 'Solicitud de servicio creada exitosamente',
+      service: data,
+      candidate_workers: candidateWorkers.candidates,
+      total_candidates: candidateWorkers.candidates.length,
+    };
   }
 
   async findMine(clientId: string) {
@@ -354,34 +366,34 @@ export class ServicesService {
       throw new NotFoundException('Servicio no encontrado');
     }
 
-    let workersQuery = this.supabaseService.sb
+    const workersResponse = await this.supabaseService.sb
       .from('worker_skills')
       .select(
         `
+      id,
+      years_experience,
+      base_price,
+      is_active,
+      worker:profiles!worker_skills_worker_id_fkey(
         id,
-        years_experience,
-        base_price,
-        worker:profiles!worker_skills_worker_id_fkey(
-          id,
-          full_name,
-          email,
-          city,
-          rating_avg,
-          rating_count,
-          profile_image_url,
-          is_active,
-          status
-        ),
-        category:service_categories(
-          id,
-          name
-        )
-      `,
+        full_name,
+        email,
+        city,
+        rating_avg,
+        rating_count,
+        profile_image_url,
+        is_active,
+        status,
+        role
+      ),
+      category:service_categories(
+        id,
+        name
+      )
+    `,
       )
       .eq('category_id', service.category_id)
       .eq('is_active', true);
-
-    const workersResponse = await workersQuery;
 
     const workers = workersResponse.data;
     const workersError = workersResponse.error;
@@ -393,7 +405,9 @@ export class ServicesService {
     const filteredWorkers =
       workers?.filter((item: any) => {
         const worker = item.worker;
+
         if (!worker) return false;
+        if (worker.role !== 'worker') return false;
         if (!worker.is_active) return false;
         if (worker.status !== 'verified') return false;
 

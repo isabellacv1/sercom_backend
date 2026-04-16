@@ -49,4 +49,16 @@ export class ProfilesService {
 
     return data;
   }
+
+  async findAll() {
+    const { data, error } = await this.supabaseService.client
+      .from('profiles')
+      .select('*');
+
+    if (error) {
+      throw new InternalServerErrorException('Error al obtener los perfiles');
+    }
+
+    return data;
+  }
 }
