@@ -44,6 +44,8 @@ export class ProfilesService {
       email: string;
     },
   ) {
+    const now = new Date().toISOString();
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
       .insert({
@@ -52,14 +54,15 @@ export class ProfilesService {
         email: dto.email,
         role: 'client',
         status: 'pending_documents',
+        is_active: true,
+        created_at: now,
+        updated_at: now,
       })
       .select()
       .single();
 
     if (error) {
-      throw new InternalServerErrorException(
-        'Error al crear el perfil del usuario',
-      );
+      throw new InternalServerErrorException(error.message);
     }
 
     return data;
