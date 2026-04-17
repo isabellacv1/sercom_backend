@@ -28,6 +28,12 @@ export class ServiceAssignmentsService {
       throw new NotFoundException('La solicitud de servicio no existe');
     }
 
+    if (service.status !== 'requested') {
+      throw new BadRequestException(
+        'Solo se pueden enviar propuestas a servicios en estado requested',
+      );
+    }
+
     const { count, error: countError } = await supabase
       .from('service_assignments')
       .select('*', { count: 'exact', head: true })
@@ -39,7 +45,7 @@ export class ServiceAssignmentsService {
 
     if ((count ?? 0) >= 5) {
       throw new BadRequestException(
-        'Esta solicitud ya alcanzó el máximo de 5 ofertas',
+        'Esta solicitud ya alcanzo el maximo de 5 ofertas',
       );
     }
 
@@ -67,6 +73,8 @@ export class ServiceAssignmentsService {
         worker_id: workerId,
         status: 'pending',
         proposed_price: dto.proposedPrice,
+        service_description: dto.serviceDescription,
+        estimated_time_minutes: dto.estimatedTimeMinutes,
         distance_km: dto.distanceKm ?? null,
         available_date: dto.availableDate,
         available_from: dto.availableFrom,
@@ -76,7 +84,7 @@ export class ServiceAssignmentsService {
       .single();
 
     if (error) {
-      throw new InternalServerErrorException('No se pudo crear la oferta');
+      throw new InternalServerErrorException(error.message);
     }
 
     return data;
@@ -110,6 +118,8 @@ export class ServiceAssignmentsService {
         worker_id,
         status,
         proposed_price,
+        service_description,
+        estimated_time_minutes,
         distance_km,
         available_date,
         available_from,
@@ -118,12 +128,16 @@ export class ServiceAssignmentsService {
         profiles:worker_id (
           id,
           full_name,
-          rating,
-          portfolio_url
+          rating_avg,
+          rating_count,
+          profile_image_url,
+          city
         )
       `,
       )
       .eq('service_id', serviceId)
+      .order('proposed_price', { ascending: true })
+      .order('estimated_time_minutes', { ascending: true })
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -132,7 +146,17 @@ export class ServiceAssignmentsService {
       );
     }
 
-    return data;
+    const proposals =
+      data?.map((item: any, index: number) => ({
+        ...item,
+        comparison_rank: index + 1,
+      })) ?? [];
+
+    return {
+      service_id: serviceId,
+      total_proposals: proposals.length,
+      proposals,
+    };
   }
 
   async respond(
@@ -172,13 +196,19 @@ export class ServiceAssignmentsService {
       throw new ForbiddenException('No puedes responder esta oferta');
     }
 
+    if (assignment.status !== 'pending') {
+      throw new BadRequestException('Esta oferta ya fue respondida');
+    }
+
     if (dto.status === 'accepted') {
+      const now = new Date().toISOString();
+
       const { error: acceptError } = await supabase
         .from('service_assignments')
         .update({
           status: 'accepted',
-          responded_at: new Date().toISOString(),
-          assigned_at: new Date().toISOString(),
+          responded_at: now,
+          assigned_at: now,
         })
         .eq('id', assignmentId);
 
@@ -190,7 +220,7 @@ export class ServiceAssignmentsService {
         .from('service_assignments')
         .update({
           status: 'rejected',
-          responded_at: new Date().toISOString(),
+          responded_at: now,
         })
         .eq('service_id', assignment.service_id)
         .neq('id', assignmentId)
@@ -198,7 +228,7 @@ export class ServiceAssignmentsService {
 
       if (rejectOthersError) {
         throw new InternalServerErrorException(
-          'Se aceptó la oferta, pero falló el rechazo de las demás',
+          'Se acepto la oferta, pero fallo el rechazo de las demas',
         );
       }
 
@@ -206,31 +236,51 @@ export class ServiceAssignmentsService {
         .from('services')
         .update({
           status: 'assigned',
-          worker_id: assignment.worker_id,
+          assigned_worker_id: assignment.worker_id,
         })
         .eq('id', assignment.service_id);
 
       if (serviceUpdateError) {
         throw new InternalServerErrorException(
-          'La oferta fue aceptada, pero no se actualizó el servicio',
+          'La oferta fue aceptada, pero no se actualizo el servicio',
         );
       }
-    } else {
-      const { error: rejectError } = await supabase
-        .from('service_assignments')
-        .update({
-          status: 'rejected',
-          responded_at: new Date().toISOString(),
-        })
-        .eq('id', assignmentId);
 
-      if (rejectError) {
-        throw new InternalServerErrorException('No se pudo rechazar la oferta');
+      const { error: historyError } = await supabase
+        .from('service_status_history')
+        .insert({
+          service_id: assignment.service_id,
+          status: 'assigned',
+          changed_by: clientId,
+          note: `Propuesta aceptada para el trabajador ${assignment.worker_id}`,
+        });
+
+      if (historyError) {
+        throw new InternalServerErrorException(
+          'La oferta fue aceptada, pero no se registro el historial',
+        );
       }
+
+      return {
+        message: 'Oferta aceptada correctamente',
+        service_status: 'assigned',
+      };
+    }
+
+    const { error: rejectError } = await supabase
+      .from('service_assignments')
+      .update({
+        status: 'rejected',
+        responded_at: new Date().toISOString(),
+      })
+      .eq('id', assignmentId);
+
+    if (rejectError) {
+      throw new InternalServerErrorException('No se pudo rechazar la oferta');
     }
 
     return {
-      message: `Oferta ${dto.status === 'accepted' ? 'aceptada' : 'rechazada'} correctamente`,
+      message: 'Oferta rechazada correctamente',
     };
   }
 
@@ -244,6 +294,8 @@ export class ServiceAssignmentsService {
         worker_id,
         status,
         proposed_price,
+        service_description,
+        estimated_time_minutes,
         distance_km,
         available_date,
         available_from,
