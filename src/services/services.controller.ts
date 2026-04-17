@@ -6,6 +6,8 @@ import { ServicesService } from './services.service';
 import { Patch } from '@nestjs/common';
 import { AssignWorkerDto } from './dto/assign-worker.dto';
 import { UpdateServiceStatusDto } from './dto/update-service-status.dto';
+import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
+import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('services')
@@ -19,6 +21,23 @@ export class ServicesController {
     @Body() dto: AssignWorkerDto,
   ) {
     return this.servicesService.assignWorker(user.sub, id, dto.worker_id);
+  }
+
+  @Post('pre-request')
+  createPreRequest(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Body() dto: CreatePreServiceRequestDto,
+  ) {
+    return this.servicesService.createPreRequest(user.sub, dto);
+  }
+
+  @Patch(':id/pre-request-details')
+  updatePreRequestDetails(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePreServiceRequestDetailsDto,
+  ) {
+    return this.servicesService.updatePreRequestDetails(user.sub, id, dto);
   }
 
   @Patch(':id/status')

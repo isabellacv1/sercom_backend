@@ -1,4 +1,6 @@
-<<<<<<< HEAD
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   Injectable,
   UnauthorizedException,
@@ -7,11 +9,6 @@ import {
 } from '@nestjs/common';
 import { LoginDto } from './dto/login.dto';
 import { SupabaseService } from '../supabase/supabase.service';
-=======
-import { ConflictException, Injectable } from '@nestjs/common';
-import { RegisterDto } from './dto/register.dto';
-import { UsersService } from '../users/users.service';
->>>>>>> 661027f (fix: solve errors in register)
 import { ProfilesService } from '../profiles/profiles.service';
 import { RegisterDto } from './dto/register.dto';
 
@@ -61,7 +58,6 @@ export class AuthService {
     }
 
     const { data, error } = await this.supabaseService.client.auth.signUp({
-
       email,
       password: dto.password,
     });

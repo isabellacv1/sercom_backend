@@ -205,6 +205,121 @@
       "name": "Services",
       "item": [
         {
+          "name": "Create Pre Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test('Retorna pre-solicitud', function () {",
+                  "  pm.expect(json).to.have.property('service');",
+                  "  pm.expect(json.service).to.have.property('id');",
+                  "  pm.expect(json.service.status).to.eql('draft');",
+                  "});",
+                  "if (json.service && json.service.id) {",
+                  "  pm.collectionVariables.set('serviceId', json.service.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{clientToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category_id\": \"{{serviceCategoryId}}\",\n  \"title\": \"Pre-solicitud de aseo\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/services/pre-request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "services",
+                "pre-request"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Complete Pre Request Details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test('Retorna solicitud en requested', function () {",
+                  "  pm.expect(json).to.have.property('service');",
+                  "  pm.expect(json.service.status).to.eql('requested');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{clientToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"Carrera 10 #20-30\",\n  \"city\": \"Bogota\",\n  \"scheduled_at\": \"2026-04-22T09:00:00.000Z\",\n  \"urgency_level\": \"medium\",\n  \"description\": \"Necesito servicio de aseo general para apartamento de 2 habitaciones.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/services/{{serviceId}}/pre-request-details",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "services",
+                "{{serviceId}}",
+                "pre-request-details"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Create Service",
           "event": [
             {
