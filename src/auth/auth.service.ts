@@ -1,33 +1,69 @@
-import { ConflictException, Injectable } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
-import { RegisterDto } from './dto/register.dto';
-import { UsersService } from '../users/users.service';
+import {
+  Injectable,
+  UnauthorizedException,
+  InternalServerErrorException,
+  ConflictException,
+} from '@nestjs/common';
+import { LoginDto } from './dto/login.dto';
+import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
+import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly usersService: UsersService,
+    private readonly supabaseService: SupabaseService,
     private readonly profilesService: ProfilesService,
   ) {}
+
+  async login(dto: LoginDto) {
+    const email = dto.email.toLowerCase().trim();
+
+    const { data, error } =
+      await this.supabaseService.client.auth.signInWithPassword({
+        email,
+        password: dto.password,
+      });
+
+    if (error || !data.user) {
+      throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    const profile = await this.profilesService.findByUserId(data.user.id);
+
+    return {
+      message: 'Login exitoso',
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        fullName: profile?.full_name ?? null,
+        role: profile?.role ?? null,
+        status: profile?.status ?? null,
+      },
+      access_token: data.session?.access_token,
+      refresh_token: data.session?.refresh_token,
+    };
+  }
 
   async register(dto: RegisterDto) {
     const email = dto.email.toLowerCase().trim();
 
-    const existingUser = await this.usersService.findByEmail(email);
+    const existingProfile = await this.profilesService.findByEmail(email);
 
-    if (existingUser) {
+    if (existingProfile) {
       throw new ConflictException('El correo electrónico ya está registrado');
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
-
-    const user = await this.usersService.createAuthUser({
+    const { data, error } = await this.supabaseService.client.auth.signUp({
       email,
-      passwordHash,
+      password: dto.password,
     });
 
-    await this.profilesService.create(user.id, {
+    if (error || !data.user) {
+      throw new InternalServerErrorException('Error al registrar el usuario');
+    }
+
+    await this.profilesService.create(data.user.id, {
       fullName: dto.fullName,
       email,
     });
@@ -35,8 +71,8 @@ export class AuthService {
     return {
       message: 'Registro exitoso',
       user: {
-        id: user.id,
-        email: user.email,
+        id: data.user.id,
+        email,
         fullName: dto.fullName,
         status: 'pending_documents',
       },

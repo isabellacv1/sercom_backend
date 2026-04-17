@@ -5,6 +5,38 @@ import { SupabaseService } from '../supabase/supabase.service';
 export class ProfilesService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
+  async findByEmail(email: string) {
+    const { data, error } = await this.supabaseService.client
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(
+        'Error al consultar perfil por correo',
+      );
+    }
+
+    return data;
+  }
+
+  async findByUserId(userId: string) {
+    const { data, error } = await this.supabaseService.client
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) {
+      throw new InternalServerErrorException(
+        'Error al obtener el perfil del usuario',
+      );
+    }
+
+    return data;
+  }
+
   async create(
     userId: string,
     dto: {
