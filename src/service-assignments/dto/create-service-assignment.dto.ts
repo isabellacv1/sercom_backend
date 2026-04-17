@@ -5,7 +5,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  MaxLength,
   Min,
 } from 'class-validator';
 
@@ -17,15 +16,6 @@ export class CreateServiceAssignmentDto {
   @IsNumber()
   @Min(0)
   proposedPrice!: number;
-
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(500)
-  serviceDescription!: string;
-
-  @IsNumber()
-  @Min(1)
-  estimatedTimeMinutes!: number;
 
   @IsOptional()
   @IsNumber()

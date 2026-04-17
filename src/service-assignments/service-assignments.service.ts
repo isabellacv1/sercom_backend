@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   ForbiddenException,
@@ -11,6 +9,38 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceAssignmentDto } from './dto/create-service-assignment.dto';
 import { RespondServiceAssignmentDto } from './dto/respond-service-assignment.dto';
 
+type ServiceRow = {
+  id: string;
+  client_id: string;
+  status: string;
+};
+
+type WorkerProfileRow = {
+  id: string;
+  role: string;
+  is_active: boolean;
+  status: string;
+};
+
+type AssignmentWithServiceRow = {
+  id: string;
+  service_id: string;
+  worker_id: string;
+  status: string;
+  services:
+    | {
+        id: string;
+        client_id: string;
+        status: string;
+      }
+    | {
+        id: string;
+        client_id: string;
+        status: string;
+      }[]
+    | null;
+};
+
 @Injectable()
 export class ServiceAssignmentsService {
   constructor(private readonly supabaseService: SupabaseService) {}
@@ -18,13 +48,39 @@ export class ServiceAssignmentsService {
   async create(workerId: string, dto: CreateServiceAssignmentDto) {
     const supabase = this.supabaseService.client;
 
+    const { data: worker, error: workerError } = await supabase
+      .from('profiles')
+      .select('id, role, is_active, status')
+      .eq('id', workerId)
+      .maybeSingle<WorkerProfileRow>();
+
+    if (workerError) {
+      throw new InternalServerErrorException('Error al validar el trabajador');
+    }
+
+    if (!worker || worker.role !== 'worker') {
+      throw new ForbiddenException('Solo los trabajadores pueden ofertar');
+    }
+
+    if (!worker.is_active || worker.status !== 'verified') {
+      throw new ForbiddenException(
+        'Tu perfil no esta habilitado para enviar ofertas',
+      );
+    }
+
     const { data: service, error: serviceError } = await supabase
       .from('services')
       .select('id, client_id, status')
       .eq('id', dto.serviceId)
-      .single();
+      .maybeSingle<ServiceRow>();
 
-    if (serviceError || !service) {
+    if (serviceError) {
+      throw new InternalServerErrorException(
+        'Error al validar la solicitud de servicio',
+      );
+    }
+
+    if (!service) {
       throw new NotFoundException('La solicitud de servicio no existe');
     }
 
@@ -73,8 +129,6 @@ export class ServiceAssignmentsService {
         worker_id: workerId,
         status: 'pending',
         proposed_price: dto.proposedPrice,
-        service_description: dto.serviceDescription,
-        estimated_time_minutes: dto.estimatedTimeMinutes,
         distance_km: dto.distanceKm ?? null,
         available_date: dto.availableDate,
         available_from: dto.availableFrom,
@@ -97,9 +151,15 @@ export class ServiceAssignmentsService {
       .from('services')
       .select('id, client_id')
       .eq('id', serviceId)
-      .single();
+      .maybeSingle<{ id: string; client_id: string }>();
 
-    if (serviceError || !service) {
+    if (serviceError) {
+      throw new InternalServerErrorException(
+        'Error al validar el servicio solicitado',
+      );
+    }
+
+    if (!service) {
       throw new NotFoundException('Servicio no encontrado');
     }
 
@@ -118,8 +178,6 @@ export class ServiceAssignmentsService {
         worker_id,
         status,
         proposed_price,
-        service_description,
-        estimated_time_minutes,
         distance_km,
         available_date,
         available_from,
@@ -131,13 +189,13 @@ export class ServiceAssignmentsService {
           rating_avg,
           rating_count,
           profile_image_url,
-          city
+          city,
+          portfolio_url
         )
       `,
       )
       .eq('service_id', serviceId)
       .order('proposed_price', { ascending: true })
-      .order('estimated_time_minutes', { ascending: true })
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -147,7 +205,7 @@ export class ServiceAssignmentsService {
     }
 
     const proposals =
-      data?.map((item: any, index: number) => ({
+      data?.map((item: Record<string, unknown>, index: number) => ({
         ...item,
         comparison_rank: index + 1,
       })) ?? [];
@@ -182,9 +240,13 @@ export class ServiceAssignmentsService {
       `,
       )
       .eq('id', assignmentId)
-      .single();
+      .maybeSingle<AssignmentWithServiceRow>();
 
-    if (assignmentError || !assignment) {
+    if (assignmentError) {
+      throw new InternalServerErrorException('Error al validar la oferta');
+    }
+
+    if (!assignment) {
       throw new NotFoundException('Oferta no encontrada');
     }
 
@@ -194,6 +256,12 @@ export class ServiceAssignmentsService {
 
     if (!service || service.client_id !== clientId) {
       throw new ForbiddenException('No puedes responder esta oferta');
+    }
+
+    if (service.status !== 'requested') {
+      throw new BadRequestException(
+        'Solo puedes responder ofertas de servicios en estado requested',
+      );
     }
 
     if (assignment.status !== 'pending') {
@@ -235,8 +303,8 @@ export class ServiceAssignmentsService {
       const { error: serviceUpdateError } = await supabase
         .from('services')
         .update({
-          status: 'assigned',
           assigned_worker_id: assignment.worker_id,
+          status: 'assigned',
         })
         .eq('id', assignment.service_id);
 
@@ -294,8 +362,6 @@ export class ServiceAssignmentsService {
         worker_id,
         status,
         proposed_price,
-        service_description,
-        estimated_time_minutes,
         distance_km,
         available_date,
         available_from,
@@ -303,8 +369,10 @@ export class ServiceAssignmentsService {
         created_at,
         services:service_id (
           id,
+          title,
           description,
           address,
+          city,
           status
         )
       `,

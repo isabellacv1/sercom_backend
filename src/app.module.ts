@@ -5,10 +5,8 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { AuthModule } from './auth/auth.module';
 import { ServicesModule } from './services/services.module';
 import { ServiceCategoriesModule } from './service-categories/service-categories.module';
-
-import { ProposalsModule } from './proposals/proposals.module';
-
 import { ServiceAssignmentsModule } from './service-assignments/service-assignments.module';
+import { ProposalsModule } from './proposals/proposals.module';
 
 @Module({
   imports: [

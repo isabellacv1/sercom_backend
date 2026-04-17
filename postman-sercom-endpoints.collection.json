@@ -205,6 +205,7 @@
       "name": "Services",
       "item": [
         {
+<<<<<<< HEAD
           "name": "Create Pre Request",
           "event": [
             {
@@ -320,6 +321,8 @@
           "response": []
         },
         {
+=======
+>>>>>>> 661027f (fix: solve errors in register)
           "name": "Create Service",
           "event": [
             {
@@ -858,7 +861,11 @@
             ],
             "body": {
               "mode": "raw",
+<<<<<<< HEAD
               "raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"proposedPrice\": 150000,\n  \"serviceDescription\": \"Instalacion, configuracion inicial y pruebas de funcionamiento.\",\n  \"estimatedTimeMinutes\": 120,\n  \"distanceKm\": 5,\n  \"availableDate\": \"2026-04-20T00:00:00.000Z\",\n  \"availableFrom\": \"08:00\",\n  \"availableTo\": \"12:00\"\n}"
+=======
+              "raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"proposedPrice\": 150000,\n  \"distanceKm\": 5,\n  \"availableDate\": \"2026-04-20T00:00:00.000Z\",\n  \"availableFrom\": \"08:00\",\n  \"availableTo\": \"12:00\"\n}"
+>>>>>>> 661027f (fix: solve errors in register)
             },
             "url": {
               "raw": "{{baseUrl}}/service-assignments",
@@ -884,12 +891,20 @@
                   "  pm.response.to.have.status(200);",
                   "});",
                   "const json = pm.response.json();",
+<<<<<<< HEAD
                   "pm.test('Retorna propuestas comparables', function () {",
                   "  pm.expect(json).to.have.property('proposals');",
                   "  pm.expect(json.proposals).to.be.an('array');",
                   "});",
                   "if (Array.isArray(json.proposals) && json.proposals.length > 0 && json.proposals[0].id) {",
                   "  pm.collectionVariables.set('assignmentId', json.proposals[0].id);",
+=======
+                  "pm.test('Retorna arreglo', function () {",
+                  "  pm.expect(json).to.be.an('array');",
+                  "});",
+                  "if (Array.isArray(json) && json.length > 0 && json[0].id) {",
+                  "  pm.collectionVariables.set('assignmentId', json[0].id);",
+>>>>>>> 661027f (fix: solve errors in register)
                   "}"
                 ]
               }

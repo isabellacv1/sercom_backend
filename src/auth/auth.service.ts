@@ -1,3 +1,4 @@
+
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -9,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { LoginDto } from './dto/login.dto';
 import { SupabaseService } from '../supabase/supabase.service';
+
+import { UsersService } from '../users/users.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { RegisterDto } from './dto/register.dto';
 
