@@ -1,0 +1,99 @@
+{
+  "id": "0f4ecb89-6ef6-4f89-9ea0-c8aef4c97d53",
+  "name": "Sercom Local",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "clientEmail",
+      "value": "cliente.prueba@example.com",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "clientPassword",
+      "value": "Password123!",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "workerEmail",
+      "value": "trabajador.prueba@example.com",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "workerPassword",
+      "value": "Password123!",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "clientToken",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "workerToken",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "serviceCategoryId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "serviceOptionId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "serviceId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "workerId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "assignmentId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "proposalServiceId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "identityDocumentPath",
+      "value": "C:/tmp/cedula.pdf",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "selfiePhotoPath",
+      "value": "C:/tmp/selfie.jpg",
+      "type": "default",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "_postman_exported_at": "2026-04-21T15:55:00.000Z",
+  "_postman_exported_using": "OpenAI Codex"
+}

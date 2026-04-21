@@ -24,9 +24,8 @@ export class JwtAuthGuard implements CanActivate {
     const token = authHeader.substring(7);
 
     const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-    if (!supabaseUrl || !supabaseAnonKey) {
+    if (!supabaseUrl) {
       throw new UnauthorizedException(
         'Falta configuración de Supabase en el servidor',
       );
@@ -36,11 +35,7 @@ export class JwtAuthGuard implements CanActivate {
       const jwksUrl = `${supabaseUrl}/auth/v1/.well-known/jwks.json`;
       console.log('JWKS URL:', jwksUrl);
 
-      const response = await fetch(jwksUrl, {
-        headers: {
-          apikey: supabaseAnonKey,
-        },
-      });
+      const response = await fetch(jwksUrl);
 
       if (!response.ok) {
         const errorText = await response.text();

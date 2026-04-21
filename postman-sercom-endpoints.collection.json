@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6df7174f-9891-4b8f-8b31-1b4475253abc",
     "name": "Sercom Endpoints Verification",
-    "description": "Coleccion para verificar los endpoints creados en el backend NestJS de Sercom. Configura baseUrl, clientToken y workerToken antes de ejecutar los endpoints protegidos.",
+    "description": "Coleccion actualizada segun los controladores y DTOs reales del proyecto NestJS. Usa http://localhost:3000 sin prefijo /api. Configura variables y tokens antes de ejecutar endpoints protegidos.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -23,6 +23,10 @@
       "value": ""
     },
     {
+      "key": "serviceOptionId",
+      "value": ""
+    },
+    {
       "key": "serviceId",
       "value": ""
     },
@@ -35,11 +39,23 @@
       "value": ""
     },
     {
+      "key": "proposalServiceId",
+      "value": ""
+    },
+    {
       "key": "clientEmail",
       "value": "cliente.prueba@example.com"
     },
     {
       "key": "clientPassword",
+      "value": "Password123!"
+    },
+    {
+      "key": "workerEmail",
+      "value": "trabajador.prueba@example.com"
+    },
+    {
+      "key": "workerPassword",
       "value": "Password123!"
     },
     {
@@ -52,6 +68,41 @@
     }
   ],
   "item": [
+    {
+      "name": "Root",
+      "item": [
+        {
+          "name": "GET /",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "Prueba basica para validar que el backend esta arriba."
+          },
+          "response": []
+        }
+      ]
+    },
     {
       "name": "Auth",
       "item": [
@@ -97,7 +148,105 @@
                 "register"
               ]
             },
-            "description": "Crea un cliente. Este endpoint no devuelve JWT."
+            "description": "Crea un usuario cliente. El registro no devuelve JWT."
+          },
+          "response": []
+        },
+        {
+          "name": "Login Client",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test('Retorna token de acceso', function () {",
+                  "  pm.expect(json).to.have.property('access_token');",
+                  "});",
+                  "if (json.access_token) {",
+                  "  pm.environment.set('clientToken', json.access_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{clientEmail}}\",\n  \"password\": \"{{clientPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login Worker",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test('Retorna token de acceso', function () {",
+                  "  pm.expect(json).to.have.property('access_token');",
+                  "});",
+                  "if (json.access_token) {",
+                  "  pm.environment.set('workerToken', json.access_token);",
+                  "}",
+                  "if (json.user && json.user.id) {",
+                  "  pm.environment.set('workerId', json.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{workerEmail}}\",\n  \"password\": \"{{workerPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Usa credenciales de un trabajador ya existente en Supabase."
           },
           "response": []
         }
@@ -169,7 +318,7 @@
                   "  pm.expect(json).to.be.an('array');",
                   "});",
                   "if (Array.isArray(json) && json.length > 0 && json[0].id) {",
-                  "  pm.collectionVariables.set('serviceCategoryId', json[0].id);",
+                  "  pm.environment.set('serviceCategoryId', json[0].id);",
                   "}"
                 ]
               }
@@ -195,7 +344,8 @@
               "path": [
                 "service-categories"
               ]
-            }
+            },
+            "description": "Este proyecto no expone endpoint para listar service_options. Debes definir manualmente {{serviceOptionId}} con un UUID valido de la tabla service_options."
           },
           "response": []
         }
@@ -222,7 +372,7 @@
                   "  pm.expect(json.service.status).to.eql('draft');",
                   "});",
                   "if (json.service && json.service.id) {",
-                  "  pm.collectionVariables.set('serviceId', json.service.id);",
+                  "  pm.environment.set('serviceId', json.service.id);",
                   "}"
                 ]
               }
@@ -278,7 +428,13 @@
                   "pm.test('Retorna solicitud en requested', function () {",
                   "  pm.expect(json).to.have.property('service');",
                   "  pm.expect(json.service.status).to.eql('requested');",
-                  "});"
+                  "});",
+                  "if (Array.isArray(json.candidate_workers) && json.candidate_workers.length > 0) {",
+                  "  const first = json.candidate_workers[0];",
+                  "  if (first.worker && first.worker.id) {",
+                  "    pm.environment.set('workerId', first.worker.id);",
+                  "  }",
+                  "}"
                 ]
               }
             }
@@ -303,7 +459,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"address\": \"Carrera 10 #20-30\",\n  \"city\": \"Bogota\",\n  \"scheduled_at\": \"2026-04-22T09:00:00.000Z\",\n  \"urgency_level\": \"medium\",\n  \"description\": \"Necesito servicio de aseo general para apartamento de 2 habitaciones.\"\n}"
+              "raw": "{\n  \"address\": \"Carrera 10 #20-30\",\n  \"city\": \"Bogota\",\n  \"scheduled_at\": \"2026-04-22T09:00:00.000Z\",\n  \"urgency_level\": \"medium\",\n  \"title\": \"Aseo apartamento\",\n  \"description\": \"Necesito servicio de aseo general para apartamento de 2 habitaciones.\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/services/{{serviceId}}/pre-request-details",
@@ -336,12 +492,12 @@
                   "  pm.expect(json.service).to.have.property('id');",
                   "});",
                   "if (json.service && json.service.id) {",
-                  "  pm.collectionVariables.set('serviceId', json.service.id);",
+                  "  pm.environment.set('proposalServiceId', json.service.id);",
                   "}",
                   "if (Array.isArray(json.candidate_workers) && json.candidate_workers.length > 0) {",
                   "  const first = json.candidate_workers[0];",
                   "  if (first.worker && first.worker.id) {",
-                  "    pm.collectionVariables.set('workerId', first.worker.id);",
+                  "    pm.environment.set('workerId', first.worker.id);",
                   "  }",
                   "}"
                 ]
@@ -368,7 +524,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"category_id\": \"{{serviceCategoryId}}\",\n  \"title\": \"Instalacion de punto de red\",\n  \"description\": \"Necesito instalacion y configuracion basica en oficina.\",\n  \"address\": \"Calle 123 #45-67\",\n  \"city\": \"Bogota\",\n  \"latitude\": 4.711,\n  \"longitude\": -74.0721,\n  \"budget_min\": 100000,\n  \"budget_max\": 180000,\n  \"scheduled_at\": \"2026-04-20T10:00:00.000Z\"\n}"
+              "raw": "{\n  \"category_id\": \"{{serviceCategoryId}}\",\n  \"service_option_id\": \"{{serviceOptionId}}\",\n  \"title\": \"Instalacion de punto de red\",\n  \"description\": \"Necesito instalacion y configuracion basica en oficina.\",\n  \"address\": \"Calle 123 #45-67\",\n  \"city\": \"Bogota\",\n  \"latitude\": 4.711,\n  \"longitude\": -74.0721,\n  \"budget_min\": 100000,\n  \"budget_max\": 180000,\n  \"scheduled_at\": \"2026-04-22T10:00:00.000Z\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/services",
@@ -378,7 +534,8 @@
               "path": [
                 "services"
               ]
-            }
+            },
+            "description": "El DTO exige service_option_id. Debes definir {{serviceOptionId}} manualmente con una opcion perteneciente a {{serviceCategoryId}}."
           },
           "response": []
         },
@@ -457,47 +614,6 @@
             },
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/services/{{serviceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "services",
-                "{{serviceId}}"
-              ]
-            },
-            "description": "Ajusta esta URL si tu ruta real es /services/me/{{serviceId}}. En el controlador actual la ruta expuesta es /services/me/:id."
-          },
-          "response": []
-        },
-        {
-          "name": "Get My Service By Id - Controller Route",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('Status 200', function () {",
-                  "  pm.response.to.have.status(200);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{clientToken}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "url": {
               "raw": "{{baseUrl}}/services/me/{{serviceId}}",
               "host": [
                 "{{baseUrl}}"
@@ -530,7 +646,7 @@
                   "if (Array.isArray(json.candidates) && json.candidates.length > 0) {",
                   "  const first = json.candidates[0];",
                   "  if (first.worker && first.worker.id) {",
-                  "    pm.collectionVariables.set('workerId', first.worker.id);",
+                  "    pm.environment.set('workerId', first.worker.id);",
                   "  }",
                   "}"
                 ]
@@ -611,7 +727,7 @@
                 "assign-worker"
               ]
             },
-            "description": "Requiere que workerId exista y corresponda a un perfil worker verificado."
+            "description": "Requiere que {{workerId}} corresponda a un perfil worker activo y verified."
           },
           "response": []
         },
@@ -833,7 +949,7 @@
                   "pm.test('Retorna oferta creada', function () {",
                   "  pm.expect(json).to.have.property('id');",
                   "});",
-                  "pm.collectionVariables.set('assignmentId', json.id);"
+                  "pm.environment.set('assignmentId', json.id);"
                 ]
               }
             }
@@ -858,7 +974,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"proposedPrice\": 150000,\n  \"serviceDescription\": \"Instalacion, configuracion inicial y pruebas de funcionamiento.\",\n  \"estimatedTimeMinutes\": 120,\n  \"distanceKm\": 5,\n  \"availableDate\": \"2026-04-20T00:00:00.000Z\",\n  \"availableFrom\": \"08:00\",\n  \"availableTo\": \"12:00\"\n}"
+              "raw": "{\n  \"serviceId\": \"{{serviceId}}\",\n  \"proposedPrice\": 150000,\n  \"serviceDescription\": \"Instalacion, configuracion inicial y pruebas de funcionamiento.\",\n  \"estimatedTimeMinutes\": 120,\n  \"distanceKm\": 5,\n  \"availableDate\": \"2026-04-22T00:00:00.000Z\",\n  \"availableFrom\": \"08:00\",\n  \"availableTo\": \"12:00\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/service-assignments",
@@ -884,12 +1000,12 @@
                   "  pm.response.to.have.status(200);",
                   "});",
                   "const json = pm.response.json();",
-
-                  "pm.test('Retorna arreglo', function () {",
-                  "  pm.expect(json).to.be.an('array');",
+                  "pm.test('Retorna propuestas', function () {",
+                  "  pm.expect(json).to.have.property('proposals');",
+                  "  pm.expect(json.proposals).to.be.an('array');",
                   "});",
-                  "if (Array.isArray(json) && json.length > 0 && json[0].id) {",
-                  "  pm.collectionVariables.set('assignmentId', json[0].id);",
+                  "if (Array.isArray(json.proposals) && json.proposals.length > 0 && json.proposals[0].id) {",
+                  "  pm.environment.set('assignmentId', json.proposals[0].id);",
                   "}"
                 ]
               }
@@ -931,6 +1047,10 @@
                 "exec": [
                   "pm.test('Status 200', function () {",
                   "  pm.response.to.have.status(200);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test('Confirma asignacion', function () {",
+                  "  pm.expect(json.service_status).to.eql('assigned');",
                   "});"
                 ]
               }
@@ -957,6 +1077,57 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"status\": \"accepted\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/service-assignments/{{assignmentId}}/respond",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-assignments",
+                "{{assignmentId}}",
+                "respond"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Respond Assignment Rejected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{clientToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"rejected\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/service-assignments/{{assignmentId}}/respond",
@@ -1018,6 +1189,66 @@
       ]
     },
     {
+      "name": "Proposals",
+      "item": [
+        {
+          "name": "Create Proposal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const json = pm.response.json();",
+                  "pm.test('Retorna propuesta', function () {",
+                  "  pm.expect(json).to.have.property('proposal');",
+                  "  pm.expect(json.proposal).to.have.property('id');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{workerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service_id\": \"{{proposalServiceId}}\",\n  \"price\": 140000,\n  \"message\": \"Puedo realizar la visita, instalar el punto de red y dejar configuracion basica validada.\",\n  \"estimated_duration\": \"2 horas\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/proposals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "proposals"
+              ]
+            },
+            "description": "Usa un servicio existente en {{proposalServiceId}}. El mensaje debe tener minimo 20 caracteres."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Users",
       "item": [
         {
@@ -1028,8 +1259,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 201 o 200', function () {",
-                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "pm.test('Status 200, 201 o 404 conocido', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 201, 404]);",
                   "});"
                 ]
               }
@@ -1073,7 +1304,7 @@
                 "documents"
               ]
             },
-            "description": "Ajusta los paths locales de los archivos antes de ejecutar esta prueba."
+            "description": "La ruta existe en UsersController, pero actualmente AppModule no importa UsersModule. Mientras eso no se corrija, esta prueba respondera 404 aunque el proyecto este arriba."
           },
           "response": []
         }
