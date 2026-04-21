@@ -14,7 +14,8 @@ export class AuthService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly profilesService: ProfilesService,
-  ) {}
+  ) {
+  }
 
   async login(dto: LoginDto) {
     const email = dto.email.toLowerCase().trim();
@@ -48,33 +49,41 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const email = dto.email.toLowerCase().trim();
 
-    const existingProfile = await this.profilesService.findByEmail(email);
-
-    if (existingProfile) {
-      throw new ConflictException('El correo electrónico ya está registrado');
-    }
-
     const { data, error } = await this.supabaseService.client.auth.signUp({
       email,
       password: dto.password,
     });
 
-    if (error || !data.user) {
-      throw new InternalServerErrorException('Error al registrar el usuario');
+    if (error) {
+      if (error.message.includes('User already registered')) {
+        throw new ConflictException('El correo ya está registrado');
+      }
+      throw new InternalServerErrorException(error.message);
     }
 
-    await this.profilesService.create(data.user.id, {
-      fullName: dto.fullName,
-      email,
-    });
+    if (!data.user) {
+      throw new InternalServerErrorException('No se pudo crear el usuario');
+    }
+
+    try {
+      await this.profilesService.create(data.user.id, {
+        fullName: dto.fullName,
+        email,
+      });
+    } catch (err) {
+      console.error('Error después de crear usuario auth:', err);
+      throw err;
+    }
 
     return {
-      message: 'Registro exitoso',
+      message: data.session
+        ? 'Registro exitoso'
+        : 'Registro exitoso. Verifica tu correo para activar la cuenta.',
       user: {
         id: data.user.id,
         email,
         fullName: dto.fullName,
-        status: 'pending_documents',
+        status: 'pending_verification',
       },
     };
   }

@@ -5,6 +5,9 @@ import { ProfilesModule } from './profiles/profiles.module';
 import { AuthModule } from './auth/auth.module';
 import { ServicesModule } from './services/services.module';
 import { ServiceCategoriesModule } from './service-categories/service-categories.module';
+import { ServiceOptionsService } from './service-options/service-options.service';
+import { ServiceOptionsController } from './service-options/service-options.controller';
+import { ServiceOptionsModule } from './service-options/service-options.module';
 
 @Module({
   imports: [
@@ -16,6 +19,9 @@ import { ServiceCategoriesModule } from './service-categories/service-categories
     AuthModule,
     ServicesModule,
     ServiceCategoriesModule,
+    ServiceOptionsModule,
   ],
+  providers: [ServiceOptionsService],
+  controllers: [ServiceOptionsController],
 })
 export class AppModule {}

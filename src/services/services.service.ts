@@ -242,11 +242,55 @@ export class ServicesService {
       );
     }
 
+    // validar categoría
+    const categoryResponse = await this.supabaseService.sb
+      .from('service_categories')
+      .select('*')
+      .eq('id', dto.category_id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    const category = categoryResponse.data;
+    const categoryError = categoryResponse.error;
+
+    if (categoryError) {
+      throw new InternalServerErrorException(categoryError.message);
+    }
+
+    if (!category) {
+      throw new NotFoundException('Categoría no encontrada');
+    }
+
+    // validar opción de servicio
+    const optionResponse = await this.supabaseService.sb
+      .from('service_options')
+      .select('*')
+      .eq('id', dto.service_option_id)
+      .maybeSingle();
+
+    const serviceOption = optionResponse.data;
+    const optionError = optionResponse.error;
+
+    if (optionError) {
+      throw new InternalServerErrorException(optionError.message);
+    }
+
+    if (!serviceOption) {
+      throw new NotFoundException('Opción de servicio no encontrada');
+    }
+
+    if (serviceOption.category_id !== dto.category_id) {
+      throw new BadRequestException(
+        'La opción de servicio no pertenece a la categoría seleccionada',
+      );
+    }
+
     const createResponse = await this.supabaseService.sb
       .from('services')
       .insert({
         client_id: clientId,
         category_id: dto.category_id,
+        service_option_id: dto.service_option_id,
         title: dto.title,
         description: dto.description,
         address: dto.address,
@@ -258,12 +302,11 @@ export class ServicesService {
         scheduled_at: dto.scheduled_at ?? null,
         status: 'requested',
       })
-      .select(
-        `
-      *,
-      category:service_categories(id, name, description, icon)
-    `,
-      )
+      .select(`
+        *,
+        category:service_categories(id, name, description, icon),
+        service_option:service_options(id, category_id, title, description, specialist_level)
+      `)
       .single();
 
     const data = createResponse.data;
@@ -301,12 +344,11 @@ export class ServicesService {
   async findMine(clientId: string) {
     const response = await this.supabaseService.sb
       .from('services')
-      .select(
-        `
+      .select(`
         *,
-        category:service_categories(id, name, description, icon)
-      `,
-      )
+        category:service_categories(id, name, description, icon),
+        service_option:service_options(id, category_id, title, description, specialist_level)
+      `)
       .eq('client_id', clientId)
       .order('created_at', { ascending: false });
 
@@ -323,12 +365,11 @@ export class ServicesService {
   async findOneMine(clientId: string, serviceId: string) {
     const response = await this.supabaseService.sb
       .from('services')
-      .select(
-        `
+      .select(`
         *,
-        category:service_categories(id, name, description, icon)
-      `,
-      )
+        category:service_categories(id, name, description, icon),
+        service_option:service_options(id, category_id, title, description, specialist_level)
+      `)
       .eq('id', serviceId)
       .eq('client_id', clientId)
       .maybeSingle();
@@ -368,30 +409,28 @@ export class ServicesService {
 
     const workersResponse = await this.supabaseService.sb
       .from('worker_skills')
-      .select(
-        `
-      id,
-      years_experience,
-      base_price,
-      is_active,
-      worker:profiles!worker_skills_worker_id_fkey(
+      .select(`
         id,
-        full_name,
-        email,
-        city,
-        rating_avg,
-        rating_count,
-        profile_image_url,
+        years_experience,
+        base_price,
         is_active,
-        status,
-        role
-      ),
-      category:service_categories(
-        id,
-        name
-      )
-    `,
-      )
+        worker:profiles!worker_skills_worker_id_fkey(
+          id,
+          full_name,
+          email,
+          city,
+          rating_avg,
+          rating_count,
+          profile_image_url,
+          is_active,
+          status,
+          role
+        ),
+        category:service_categories(
+          id,
+          name
+        )
+      `)
       .eq('category_id', service.category_id)
       .eq('is_active', true);
 
@@ -424,6 +463,7 @@ export class ServicesService {
     return {
       service_id: service.id,
       category_id: service.category_id,
+      service_option_id: service.service_option_id,
       city: service.city,
       candidates: filteredWorkers,
     };

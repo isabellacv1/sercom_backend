@@ -1,9 +1,14 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  ConflictException,
+} from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 
 @Injectable()
 export class ProfilesService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  constructor(private readonly supabaseService: SupabaseService) {
+  }
 
   async findByEmail(email: string) {
     const { data, error } = await this.supabaseService.client
@@ -44,22 +49,29 @@ export class ProfilesService {
       email: string;
     },
   ) {
+    const existingProfile = await this.findByUserId(userId);
+
+    if (existingProfile) {
+      console.log('El perfil ya existe, se retorna el existente');
+      return existingProfile;
+    }
+
+    const payload = {
+      id: userId,
+      full_name: dto.fullName,
+      email: dto.email,
+      role: 'client',
+      status: 'pending_verification',
+    };
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
-      .insert({
-        id: userId,
-        full_name: dto.fullName,
-        email: dto.email,
-        role: 'client',
-        status: 'pending_documents',
-      })
+      .insert(payload)
       .select()
       .single();
 
     if (error) {
-      throw new InternalServerErrorException(
-        'Error al crear el perfil del usuario',
-      );
+      throw new InternalServerErrorException(error.message);
     }
 
     return data;
