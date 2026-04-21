@@ -7,10 +7,178 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
+import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
 
 @Injectable()
 export class ServicesService {
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  async createPreRequest(
+    clientId: string,
+    dto: CreatePreServiceRequestDto,
+  ) {
+    const categoryResponse = await this.supabaseService.sb
+      .from('service_categories')
+      .select('id, name, description, icon, is_active')
+      .eq('id', dto.category_id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    const category = categoryResponse.data;
+    const categoryError = categoryResponse.error;
+
+    if (categoryError) {
+      throw new InternalServerErrorException(categoryError.message);
+    }
+
+    if (!category) {
+      throw new NotFoundException('Categoria de servicio no encontrada');
+    }
+
+    const draftTitle = dto.title?.trim() || `Pre-solicitud de ${category.name}`;
+
+    const createResponse = await this.supabaseService.sb
+      .from('services')
+      .insert({
+        client_id: clientId,
+        category_id: dto.category_id,
+        title: draftTitle,
+        description:
+          'Pre-solicitud creada. Pendiente completar ubicacion, fecha y urgencia.',
+        address: 'Pendiente por definir',
+        city: null,
+        latitude: null,
+        longitude: null,
+        scheduled_at: null,
+        urgency_level: null,
+        status: 'draft',
+      })
+      .select(
+        `
+        *,
+        category:service_categories(id, name, description, icon)
+      `,
+      )
+      .single();
+
+    const data = createResponse.data;
+    const error = createResponse.error;
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const historyResponse = await this.supabaseService.sb
+      .from('service_status_history')
+      .insert({
+        service_id: data.id,
+        status: 'draft',
+        changed_by: clientId,
+        note: `Pre-solicitud creada para la categoria ${category.name}`,
+      });
+
+    const historyError = historyResponse.error;
+
+    if (historyError) {
+      throw new InternalServerErrorException(historyError.message);
+    }
+
+    return {
+      message: 'Pre-solicitud creada exitosamente',
+      service: data,
+      required_fields: ['address', 'scheduled_at', 'urgency_level'],
+    };
+  }
+
+  async updatePreRequestDetails(
+    clientId: string,
+    serviceId: string,
+    dto: UpdatePreServiceRequestDetailsDto,
+  ) {
+    const serviceResponse = await this.supabaseService.sb
+      .from('services')
+      .select(
+        `
+        *,
+        category:service_categories(id, name, description, icon)
+      `,
+      )
+      .eq('id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    const service = serviceResponse.data;
+    const serviceError = serviceResponse.error;
+
+    if (serviceError) {
+      throw new InternalServerErrorException(serviceError.message);
+    }
+
+    if (!service) {
+      throw new NotFoundException('Pre-solicitud no encontrada');
+    }
+
+    if (service.status !== 'draft') {
+      throw new BadRequestException(
+        'Solo puedes completar solicitudes en estado draft',
+      );
+    }
+
+    const updateResponse = await this.supabaseService.sb
+      .from('services')
+      .update({
+        address: dto.address,
+        city: dto.city ?? null,
+        scheduled_at: dto.scheduled_at,
+        urgency_level: dto.urgency_level,
+        title: dto.title?.trim() || service.title,
+        description:
+          dto.description?.trim() ||
+          service.description ||
+          'Solicitud lista para ser publicada',
+        status: 'requested',
+      })
+      .eq('id', serviceId)
+      .select(
+        `
+        *,
+        category:service_categories(id, name, description, icon)
+      `,
+      )
+      .single();
+
+    const updatedService = updateResponse.data;
+    const updateError = updateResponse.error;
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    const historyResponse = await this.supabaseService.sb
+      .from('service_status_history')
+      .insert({
+        service_id: serviceId,
+        status: 'requested',
+        changed_by: clientId,
+        note: `Pre-solicitud completada con urgencia ${dto.urgency_level}`,
+      });
+
+    const historyError = historyResponse.error;
+
+    if (historyError) {
+      throw new InternalServerErrorException(historyError.message);
+    }
+
+    const candidateWorkers = await this.findCandidateWorkers(clientId, serviceId);
+
+    return {
+      message: 'Pre-solicitud completada exitosamente',
+      service: updatedService,
+      candidate_workers: candidateWorkers.candidates,
+      total_candidates: candidateWorkers.candidates.length,
+    };
+  }
 
   async findStatusHistory(userId: string, serviceId: string) {
     const serviceResponse = await this.supabaseService.sb
@@ -140,6 +308,7 @@ export class ServicesService {
     nextStatus: string,
   ): boolean {
     const validTransitions: Record<string, string[]> = {
+      draft: ['requested'],
       requested: ['assigned'],
       assigned: ['on_the_way'],
       on_the_way: ['in_progress'],

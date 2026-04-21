@@ -1,10 +1,11 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Database } from 'src/types/supabase';
 
 @Injectable()
 export class SupabaseService {
-  readonly client: SupabaseClient;
+  readonly client: SupabaseClient<Database>;
 
   constructor(private readonly configService: ConfigService) {
     const url = this.configService.get<string>('SUPABASE_URL');
@@ -16,7 +17,7 @@ export class SupabaseService {
       );
     }
 
-    this.client = createClient(url, key, {
+    this.client = createClient<Database>(url, key, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
@@ -24,7 +25,7 @@ export class SupabaseService {
     });
   }
 
-  get sb(): SupabaseClient {
+  get sb(): SupabaseClient<Database> {
     return this.client;
   }
 }

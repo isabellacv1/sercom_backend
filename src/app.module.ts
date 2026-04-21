@@ -8,6 +8,8 @@ import { ServiceCategoriesModule } from './service-categories/service-categories
 import { ServiceOptionsService } from './service-options/service-options.service';
 import { ServiceOptionsController } from './service-options/service-options.controller';
 import { ServiceOptionsModule } from './service-options/service-options.module';
+import { ServiceAssignmentsModule } from './service-assignments/service-assignments.module';
+import { ProposalsModule } from './proposals/proposals.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { ServiceOptionsModule } from './service-options/service-options.module';
     ServicesModule,
     ServiceCategoriesModule,
     ServiceOptionsModule,
+    ProposalsModule,
+    ServiceAssignmentsModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],

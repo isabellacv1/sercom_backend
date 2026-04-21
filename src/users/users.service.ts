@@ -9,8 +9,8 @@ export class UsersService {
     const normalizedEmail = email.toLowerCase().trim();
 
     const { data, error } = await this.supabaseService.client
-      .from('users')
-      .select('*')
+      .from('profiles')
+      .select('id, email')
       .eq('email', normalizedEmail)
       .maybeSingle();
 
@@ -25,7 +25,7 @@ export class UsersService {
 
   async findById(id: string) {
     const { data, error } = await this.supabaseService.client
-      .from('users')
+      .from('profiles')
       .select('*')
       .eq('id', id)
       .maybeSingle();
@@ -37,22 +37,29 @@ export class UsersService {
     return data;
   }
 
-  async createAuthUser(payload: { email: string; passwordHash: string }) {
+  async createAuthUser(payload: { email: string; password: string }) {
     const normalizedEmail = payload.email.toLowerCase().trim();
 
-    const { data, error } = await this.supabaseService.client
-      .from('users')
-      .insert({
+    const { data, error } =
+      await this.supabaseService.client.auth.admin.createUser({
         email: normalizedEmail,
-        password_hash: payload.passwordHash,
-      })
-      .select()
-      .single();
+        password: payload.password,
+        email_confirm: true,
+      });
 
     if (error) {
-      throw new InternalServerErrorException('Error al crear el usuario');
+      throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    if (!data.user) {
+      throw new InternalServerErrorException(
+        'Supabase no devolvio el usuario creado',
+      );
+    }
+
+    return {
+      id: data.user.id,
+      email: data.user.email ?? normalizedEmail,
+    };
   }
 }
