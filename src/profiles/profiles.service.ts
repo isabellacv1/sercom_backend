@@ -1,14 +1,16 @@
 import {
   Injectable,
   InternalServerErrorException,
-  ConflictException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import { Database } from '../types/supabase';
+
+type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
+type ProfileStatus = Database['public']['Enums']['profile_status'];
 
 @Injectable()
 export class ProfilesService {
-  constructor(private readonly supabaseService: SupabaseService) {
-  }
+  constructor(private readonly supabaseService: SupabaseService) {}
 
   async findByEmail(email: string) {
     const { data, error } = await this.supabaseService.client
@@ -56,7 +58,7 @@ export class ProfilesService {
       return existingProfile;
     }
 
-    const payload = {
+    const payload: ProfileInsert = {
       id: userId,
       full_name: dto.fullName,
       email: dto.email,
@@ -77,7 +79,7 @@ export class ProfilesService {
     return data;
   }
 
-  async updateStatus(userId: string, status: string) {
+  async updateStatus(userId: string, status: ProfileStatus) {
     const { data, error } = await this.supabaseService.client
       .from('profiles')
       .update({ status })

@@ -9,6 +9,10 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
+import { Database } from '../types/supabase';
+
+type ServiceUpdate = Database['public']['Tables']['services']['Update'];
+type ServiceStatus = Database['public']['Enums']['service_status'];
 
 @Injectable()
 export class ServicesService {
@@ -67,6 +71,12 @@ export class ServicesService {
 
     if (error) {
       throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new InternalServerErrorException(
+        'No se pudo crear la pre-solicitud',
+      );
     }
 
     const historyResponse = await this.supabaseService.sb
@@ -263,7 +273,7 @@ export class ServicesService {
       );
     }
 
-    const updatePayload: Record<string, unknown> = {
+    const updatePayload: ServiceUpdate = {
       status: nextStatus,
     };
 
@@ -285,29 +295,14 @@ export class ServicesService {
       throw new InternalServerErrorException(updateError.message);
     }
 
-    const historyResponse = await this.supabaseService.sb
-      .from('service_status_history')
-      .insert({
-        service_id: serviceId,
-        status: nextStatus,
-        changed_by: workerId,
-        note: `Estado actualizado a ${nextStatus}`,
-      });
-
-    const historyError = historyResponse.error;
-
-    if (historyError) {
-      throw new InternalServerErrorException(historyError.message);
-    }
-
     return updatedService;
   }
 
   private isValidStatusTransition(
-    currentStatus: string,
-    nextStatus: string,
+    currentStatus: ServiceStatus,
+    nextStatus: ServiceStatus,
   ): boolean {
-    const validTransitions: Record<string, string[]> = {
+    const validTransitions: Partial<Record<ServiceStatus, ServiceStatus[]>> = {
       draft: ['requested'],
       requested: ['assigned'],
       assigned: ['on_the_way'],
@@ -411,7 +406,6 @@ export class ServicesService {
       );
     }
 
-    // validar categoría
     const categoryResponse = await this.supabaseService.sb
       .from('service_categories')
       .select('*')
@@ -430,7 +424,6 @@ export class ServicesService {
       throw new NotFoundException('Categoría no encontrada');
     }
 
-    // validar opción de servicio
     const optionResponse = await this.supabaseService.sb
       .from('service_options')
       .select('*')
@@ -483,6 +476,12 @@ export class ServicesService {
 
     if (error) {
       throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data) {
+      throw new InternalServerErrorException(
+        'No se pudo crear la solicitud de servicio',
+      );
     }
 
     const historyResponse = await this.supabaseService.sb

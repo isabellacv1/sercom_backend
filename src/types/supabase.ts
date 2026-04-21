@@ -41,7 +41,6 @@ export type Database = {
           entity_id?: string | null
           entity_type?: string
           id?: string
-          status?: string | null
         }
         Relationships: [
           {
@@ -276,6 +275,57 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      proposals: {
+        Row: {
+          created_at: string
+          estimated_duration: string | null
+          id: string
+          message: string | null
+          price: number
+          service_id: string
+          status: string
+          technician_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          estimated_duration?: string | null
+          id?: string
+          message?: string | null
+          price: number
+          service_id: string
+          status?: string
+          technician_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          estimated_duration?: string | null
+          id?: string
+          message?: string | null
+          price?: number
+          service_id?: string
+          status?: string
+          technician_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposals_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposals_technician_id_fkey"
+            columns: ["technician_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       reports: {
         Row: {

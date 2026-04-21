@@ -5,6 +5,9 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
+import { Database } from '../types/supabase';
+
+type UserDocumentInsert = Database['public']['Tables']['user_documents']['Insert'];
 
 @Injectable()
 export class UsersDocumentsService {
@@ -33,8 +36,9 @@ export class UsersDocumentsService {
     );
     const selfieFileName = this.sanitizeFileName(selfiePhoto.originalname);
 
-    const identityPath = `users/${userId}/identity-${Date.now()}-${identityFileName}`;
-    const selfiePath = `users/${userId}/selfie-${Date.now()}-${selfieFileName}`;
+    const now = Date.now();
+    const identityPath = `users/${userId}/identity-${now}-${identityFileName}`;
+    const selfiePath = `users/${userId}/selfie-${now}-${selfieFileName}`;
 
     const identityUpload = await supabase.storage
       .from('user-documents')
@@ -70,24 +74,26 @@ export class UsersDocumentsService {
       .from('user-documents')
       .getPublicUrl(selfiePath).data.publicUrl;
 
+    const documentsPayload: UserDocumentInsert[] = [
+      {
+        user_id: userId,
+        document_type: 'id_card',
+        file_url: identityUrl,
+        file_name: identityFileName,
+        verified: false,
+      },
+      {
+        user_id: userId,
+        document_type: 'selfie',
+        file_url: selfieUrl,
+        file_name: selfieFileName,
+        verified: false,
+      },
+    ];
+
     const { error: documentsError } = await supabase
       .from('user_documents')
-      .insert([
-        {
-          user_id: userId,
-          document_type: 'IDENTITY_DOCUMENT',
-          file_url: identityUrl,
-          file_name: identityFileName,
-          verified: false,
-        },
-        {
-          user_id: userId,
-          document_type: 'SELFIE_PHOTO',
-          file_url: selfieUrl,
-          file_name: selfieFileName,
-          verified: false,
-        },
-      ]);
+      .insert(documentsPayload);
 
     if (documentsError) {
       throw new InternalServerErrorException(
@@ -95,11 +101,11 @@ export class UsersDocumentsService {
       );
     }
 
-    await this.profilesService.updateStatus(userId, 'pending_review');
+    await this.profilesService.updateStatus(userId, 'pending_verification');
 
     return {
       message: 'Documentos cargados correctamente',
-      status: 'pending_review',
+      status: 'pending_verification',
       documents: {
         identityDocument: {
           fileName: identityFileName,
