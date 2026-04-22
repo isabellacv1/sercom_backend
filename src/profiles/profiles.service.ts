@@ -50,6 +50,12 @@ export class ProfilesService {
     dto: {
       fullName: string;
       email: string;
+      roles: string[];
+      activeRole: string;
+      cedula: string | undefined;
+      phone: string | undefined;
+      address: string | undefined;
+      specialty: string | undefined
     },
   ) {
     const existingProfile = await this.findByUserId(userId);

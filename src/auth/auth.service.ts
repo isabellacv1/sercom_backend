@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
   InternalServerErrorException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { LoginDto } from './dto/login.dto';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -49,54 +50,76 @@ export class AuthService {
     };
   }
 
- async register(dto: RegisterDto) {
-  const email = dto.email.toLowerCase().trim();
+  async register(dto: RegisterDto) {
+    const email = dto.email.toLowerCase().trim();
+    const roles = dto.roles ?? [];
+    const activeRole = dto.activeRole?.trim();
 
-  console.log('DTO REGISTER:', dto);
+    console.log('DTO REGISTER:', dto);
 
-  const { data, error } = await this.supabaseService.client.auth.signUp({
-    email,
-    password: dto.password,
-  });
-
-  console.log('SUPABASE SIGNUP DATA:', data);
-  console.log('SUPABASE SIGNUP ERROR:', error);
-
-  if (error) {
-    if (error.message.includes('User already registered')) {
-      throw new ConflictException('El correo ya está registrado');
+    if (!roles.length) {
+      throw new BadRequestException('Debes enviar al menos un rol');
     }
-    throw new InternalServerErrorException(error.message);
-  }
 
-  if (!data.user) {
-    throw new InternalServerErrorException('No se pudo crear el usuario');
-  }
+    if (!activeRole) {
+      throw new BadRequestException('Debes enviar activeRole');
+    }
 
-  try {
-    const profile = await this.profilesService.create(data.user.id, {
-      fullName: dto.fullName,
+    if (!roles.includes(activeRole)) {
+      throw new BadRequestException(
+        'activeRole debe existir dentro de roles',
+      );
+    }
+
+    const { data, error } = await this.supabaseService.client.auth.signUp({
       email,
+      password: dto.password,
     });
 
-    console.log('PROFILE CREATED:', profile);
-  } catch (err) {
-    console.error('Error después de crear usuario auth:', err);
-    throw err;
-  }
+    console.log('SUPABASE SIGNUP DATA:', data);
+    console.log('SUPABASE SIGNUP ERROR:', error);
 
-  return {
-    message: data.session
-      ? 'Registro exitoso'
-      : 'Registro exitoso. Verifica tu correo para activar la cuenta.',
-    user: {
-      id: data.user.id,
-      email,
-      fullName: dto.fullName,
-      roles: ['client'],
-      activeRole: 'client',
-      status: 'pending_verification',
-    },
-  };
-}
+    if (error) {
+      if (error.message.includes('User already registered')) {
+        throw new ConflictException('El correo ya está registrado');
+      }
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data.user) {
+      throw new InternalServerErrorException('No se pudo crear el usuario');
+    }
+
+    try {
+      const profile = await this.profilesService.create(data.user.id, {
+        fullName: dto.fullName,
+        email,
+        roles,
+        activeRole,
+        cedula: dto.cedula,
+        phone: dto.phone,
+        address: dto.address,
+        specialty: dto.specialty,
+      });
+
+      console.log('PROFILE CREATED:', profile);
+    } catch (err) {
+      console.error('Error después de crear usuario auth:', err);
+      throw err;
+    }
+
+    return {
+      message: data.session
+        ? 'Registro exitoso'
+        : 'Registro exitoso. Verifica tu correo para activar la cuenta.',
+      user: {
+        id: data.user.id,
+        email,
+        fullName: dto.fullName,
+        roles,
+        activeRole,
+        status: 'pending_verification',
+      },
+    };
+  }
 }
