@@ -17,8 +17,7 @@ export class AuthService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly profilesService: ProfilesService,
-  ) {
-  }
+  ) {}
 
   async login(dto: LoginDto) {
     const email = dto.email.toLowerCase().trim();
@@ -41,7 +40,8 @@ export class AuthService {
         id: data.user.id,
         email: data.user.email,
         fullName: profile?.full_name ?? null,
-        role: profile?.role ?? null,
+        roles: profile?.roles ?? [],
+        activeRole: profile?.active_role ?? null,
         status: profile?.status ?? null,
       },
       access_token: data.session?.access_token,
@@ -86,6 +86,8 @@ export class AuthService {
         id: data.user.id,
         email,
         fullName: dto.fullName,
+        roles: ['client'],
+        activeRole: 'client',
         status: 'pending_verification',
       },
     };

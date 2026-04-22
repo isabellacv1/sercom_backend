@@ -344,7 +344,7 @@ export class ServicesService {
       .from('profiles')
       .select('*')
       .eq('id', workerId)
-      .eq('role', 'worker')
+      .contains('roles', ['worker'])
       .eq('is_active', true)
       .eq('status', 'verified')
       .maybeSingle();

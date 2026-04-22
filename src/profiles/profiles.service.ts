@@ -1,6 +1,7 @@
 import {
   Injectable,
   InternalServerErrorException,
+  BadRequestException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { Database } from '../types/supabase';
@@ -62,7 +63,8 @@ export class ProfilesService {
       id: userId,
       full_name: dto.fullName,
       email: dto.email,
-      role: 'client',
+      roles: ['client'],
+      active_role: 'client',
       status: 'pending_verification',
     };
 
@@ -90,6 +92,68 @@ export class ProfilesService {
     if (error) {
       throw new InternalServerErrorException(
         'Error al actualizar el estado del perfil',
+      );
+    }
+
+    return data;
+  }
+
+  async addRole(userId: string, newRole: string) {
+    const profile = await this.findByUserId(userId);
+
+    if (!profile) {
+      throw new BadRequestException('Perfil no encontrado');
+    }
+
+    const currentRoles = Array.isArray(profile.roles) ? profile.roles : [];
+
+    if (currentRoles.includes(newRole)) {
+      return profile;
+    }
+
+    const updatedRoles = [...currentRoles, newRole];
+
+    const { data, error } = await this.supabaseService.client
+      .from('profiles')
+      .update({ roles: updatedRoles })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(
+        'Error al agregar el rol al perfil',
+      );
+    }
+
+    return data;
+  }
+
+  async setActiveRole(userId: string, activeRole: string) {
+    const profile = await this.findByUserId(userId);
+
+    if (!profile) {
+      throw new BadRequestException('Perfil no encontrado');
+    }
+
+    const currentRoles = Array.isArray(profile.roles) ? profile.roles : [];
+
+    if (!currentRoles.includes(activeRole)) {
+      throw new BadRequestException(
+        'El rol activo debe existir dentro del arreglo de roles',
+      );
+    }
+
+    const { data, error } = await this.supabaseService.client
+      .from('profiles')
+      .update({ active_role: activeRole })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new InternalServerErrorException(
+        'Error al actualizar el rol activo',
       );
     }
 
