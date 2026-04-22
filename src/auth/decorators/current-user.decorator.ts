@@ -4,7 +4,8 @@ import { Request } from 'express';
 export type JwtUser = {
   sub: string;
   email?: string;
-  role?: string;
+  roles?: string[];
+  activeRole?: string;
 };
 
 type AuthRequest = Request & {

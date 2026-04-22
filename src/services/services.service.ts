@@ -344,7 +344,7 @@ export class ServicesService {
       .from('profiles')
       .select('*')
       .eq('id', workerId)
-      .eq('role', 'worker')
+      .contains('roles', ['worker'])
       .eq('is_active', true)
       .eq('status', 'verified')
       .maybeSingle();
@@ -556,84 +556,85 @@ export class ServicesService {
     return data;
   }
 
-  async findCandidateWorkers(clientId: string, serviceId: string) {
-    const serviceResponse = await this.supabaseService.sb
-      .from('services')
-      .select('*')
-      .eq('id', serviceId)
-      .eq('client_id', clientId)
-      .maybeSingle();
+ async findCandidateWorkers(clientId: string, serviceId: string) {
+  const serviceResponse = await this.supabaseService.sb
+    .from('services')
+    .select('*')
+    .eq('id', serviceId)
+    .eq('client_id', clientId)
+    .maybeSingle();
 
-    const service = serviceResponse.data;
-    const serviceError = serviceResponse.error;
+  const service = serviceResponse.data;
+  const serviceError = serviceResponse.error;
 
-    if (serviceError) {
-      throw new InternalServerErrorException(serviceError.message);
-    }
-
-    if (!service) {
-      throw new NotFoundException('Servicio no encontrado');
-    }
-
-    const workersResponse = await this.supabaseService.sb
-      .from('worker_skills')
-      .select(`
-        id,
-        years_experience,
-        base_price,
-        is_active,
-        worker:profiles!worker_skills_worker_id_fkey(
-          id,
-          full_name,
-          email,
-          city,
-          rating_avg,
-          rating_count,
-          profile_image_url,
-          is_active,
-          status,
-          role
-        ),
-        category:service_categories(
-          id,
-          name
-        )
-      `)
-      .eq('category_id', service.category_id)
-      .eq('is_active', true);
-
-    const workers = workersResponse.data;
-    const workersError = workersResponse.error;
-
-    if (workersError) {
-      throw new InternalServerErrorException(workersError.message);
-    }
-
-    const filteredWorkers =
-      workers?.filter((item: any) => {
-        const worker = item.worker;
-
-        if (!worker) return false;
-        if (worker.role !== 'worker') return false;
-        if (!worker.is_active) return false;
-        if (worker.status !== 'verified') return false;
-
-        if (service.city && worker.city) {
-          return (
-            worker.city.trim().toLowerCase() ===
-            service.city.trim().toLowerCase()
-          );
-        }
-
-        return true;
-      }) ?? [];
-
-    return {
-      service_id: service.id,
-      category_id: service.category_id,
-      service_option_id: service.service_option_id,
-      city: service.city,
-      candidates: filteredWorkers,
-    };
+  if (serviceError) {
+    throw new InternalServerErrorException(serviceError.message);
   }
+
+  if (!service) {
+    throw new NotFoundException('Servicio no encontrado');
+  }
+
+  const workersResponse = await this.supabaseService.sb
+    .from('worker_skills')
+    .select(`
+      id,
+      years_experience,
+      base_price,
+      is_active,
+      worker:profiles!worker_skills_worker_id_fkey(
+        id,
+        full_name,
+        email,
+        city,
+        rating_avg,
+        rating_count,
+        profile_image_url,
+        is_active,
+        status,
+        active_role,
+        roles
+      ),
+      category:service_categories(
+        id,
+        name
+      )
+    `)
+    .eq('category_id', service.category_id)
+    .eq('is_active', true);
+
+  const workers = workersResponse.data;
+  const workersError = workersResponse.error;
+
+  if (workersError) {
+    throw new InternalServerErrorException(workersError.message);
+  }
+
+const filteredWorkers =
+  workers?.filter((item: any) => {
+    const worker = item.worker;
+
+    if (!worker) return false;
+    if (worker.active_role !== 'worker') return false;
+    if (!worker.is_active) return false;
+    if (worker.status !== 'verified') return false;
+
+    if (service.city && worker.city) {
+      return (
+        worker.city.trim().toLowerCase() ===
+        service.city.trim().toLowerCase()
+      );
+    }
+
+    return true;
+  }) ?? [];
+
+  return {
+    service_id: service.id,
+    category_id: service.category_id,
+    service_option_id: service.service_option_id,
+    city: service.city,
+    candidates: filteredWorkers,
+  };
+}
 }
