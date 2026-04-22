@@ -610,25 +610,24 @@ export class ServicesService {
     throw new InternalServerErrorException(workersError.message);
   }
 
-  const filteredWorkers =
-    workers?.filter((item: any) => {
-      const worker = item.worker;
+const filteredWorkers =
+  workers?.filter((item: any) => {
+    const worker = item.worker;
 
-      if (!worker) return false;
-      if (worker.active_role !== 'worker') return false;
-      if (!worker.roles?.includes('worker')) return false;
-      if (!worker.is_active) return false;
-      if (worker.status !== 'verified') return false;
+    if (!worker) return false;
+    if (worker.active_role !== 'worker') return false;
+    if (!worker.is_active) return false;
+    if (worker.status !== 'verified') return false;
 
-      if (service.city && worker.city) {
-        return (
-          worker.city.trim().toLowerCase() ===
-          service.city.trim().toLowerCase()
-        );
-      }
+    if (service.city && worker.city) {
+      return (
+        worker.city.trim().toLowerCase() ===
+        service.city.trim().toLowerCase()
+      );
+    }
 
-      return true;
-    }) ?? [];
+    return true;
+  }) ?? [];
 
   return {
     service_id: service.id,
