@@ -9,19 +9,70 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
+import { FindOpportunitiesQueryDto } from './dto/find-opportunities-query.dto';
 import { Database } from '../types/supabase';
 
 type ServiceUpdate = Database['public']['Tables']['services']['Update'];
 type ServiceStatus = Database['public']['Enums']['service_status'];
 
+type CandidateWorkerProfile = Pick<
+  Database['public']['Tables']['profiles']['Row'],
+  | 'id'
+  | 'full_name'
+  | 'email'
+  | 'city'
+  | 'rating_avg'
+  | 'rating_count'
+  | 'profile_image_url'
+  | 'is_active'
+  | 'status'
+  | 'role'
+>;
+
+type WorkerSkillCandidateJoin = Pick<
+  Database['public']['Tables']['worker_skills']['Row'],
+  'id' | 'years_experience' | 'base_price' | 'is_active'
+> & {
+  worker: CandidateWorkerProfile;
+  category: Pick<
+    Database['public']['Tables']['service_categories']['Row'],
+    'id' | 'name'
+  > | null;
+};
+
+function isWorkerSkillCandidateJoin(
+  value: unknown,
+): value is WorkerSkillCandidateJoin {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  if (!('worker' in value)) {
+    return false;
+  }
+  const workerUnknown = (value as { worker: unknown }).worker;
+  if (typeof workerUnknown !== 'object' || workerUnknown === null) {
+    return false;
+  }
+  const p = workerUnknown as Record<string, unknown>;
+  return (
+    typeof p.id === 'string' &&
+    typeof p.full_name === 'string' &&
+    typeof p.email === 'string' &&
+    (p.city === null || typeof p.city === 'string') &&
+    (p.rating_avg === null || typeof p.rating_avg === 'number') &&
+    (p.rating_count === null || typeof p.rating_count === 'number') &&
+    (p.profile_image_url === null || typeof p.profile_image_url === 'string') &&
+    typeof p.is_active === 'boolean' &&
+    typeof p.status === 'string' &&
+    typeof p.role === 'string'
+  );
+}
+
 @Injectable()
 export class ServicesService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  async createPreRequest(
-    clientId: string,
-    dto: CreatePreServiceRequestDto,
-  ) {
+  async createPreRequest(clientId: string, dto: CreatePreServiceRequestDto) {
     const categoryResponse = await this.supabaseService.sb
       .from('service_categories')
       .select('id, name, description, icon, is_active')
@@ -180,7 +231,10 @@ export class ServicesService {
       throw new InternalServerErrorException(historyError.message);
     }
 
-    const candidateWorkers = await this.findCandidateWorkers(clientId, serviceId);
+    const candidateWorkers = await this.findCandidateWorkers(
+      clientId,
+      serviceId,
+    );
 
     return {
       message: 'Pre-solicitud completada exitosamente',
@@ -602,18 +656,22 @@ export class ServicesService {
       .eq('category_id', service.category_id)
       .eq('is_active', true);
 
-    const workers = workersResponse.data;
     const workersError = workersResponse.error;
 
     if (workersError) {
       throw new InternalServerErrorException(workersError.message);
     }
 
-    const filteredWorkers =
-      workers?.filter((item: any) => {
-        const worker = item.worker;
+    const workersRaw: unknown = workersResponse.data;
+    const workersList: unknown[] = Array.isArray(workersRaw) ? workersRaw : [];
 
-        if (!worker) return false;
+    const filteredWorkers = workersList.filter(
+      (item): item is WorkerSkillCandidateJoin => {
+        if (!isWorkerSkillCandidateJoin(item)) {
+          return false;
+        }
+        const { worker } = item;
+
         if (worker.role !== 'worker') return false;
         if (!worker.is_active) return false;
         if (worker.status !== 'verified') return false;
@@ -626,7 +684,8 @@ export class ServicesService {
         }
 
         return true;
-      }) ?? [];
+      },
+    );
 
     return {
       service_id: service.id,
@@ -635,5 +694,200 @@ export class ServicesService {
       city: service.city,
       candidates: filteredWorkers,
     };
+  }
+
+  /**
+   * Trabajos publicados (requested) sin técnico asignado, para que un trabajador explore y postule.
+   * No incluye solicitudes creadas por el propio usuario.
+   */
+  async findOpportunities(userId: string, query: FindOpportunitiesQueryDto) {
+    this.assertOpportunitiesGeoParams(query);
+
+    const page = query.page ?? 1;
+    const limit = Math.min(query.limit ?? 20, 50);
+    const offset = (page - 1) * limit;
+
+    const fullSelect = `
+        *,
+        category:service_categories(id, name, description, icon),
+        service_option:service_options(id, category_id, title, description, specialist_level)
+      `;
+
+    const hasGeo =
+      query.latitude != null &&
+      query.longitude != null &&
+      query.radiusKm != null;
+
+    if (!hasGeo) {
+      let q = this.supabaseService.sb
+        .from('services')
+        .select(fullSelect, { count: 'exact' })
+        .eq('status', 'requested')
+        .is('assigned_worker_id', null)
+        .neq('client_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (query.city?.trim()) {
+        q = q.ilike('city', `%${query.city.trim()}%`);
+      }
+
+      const { data, error, count } = await q.range(offset, offset + limit - 1);
+
+      if (error) {
+        throw new InternalServerErrorException(error.message);
+      }
+
+      return {
+        data: data ?? [],
+        page,
+        limit,
+        total: count ?? 0,
+      };
+    }
+
+    const { latMin, latMax, lngMin, lngMax } = this.geoBoundingBox(
+      query.latitude!,
+      query.longitude!,
+      query.radiusKm!,
+    );
+
+    let geoQuery = this.supabaseService.sb
+      .from('services')
+      .select('id, latitude, longitude, created_at')
+      .eq('status', 'requested')
+      .is('assigned_worker_id', null)
+      .neq('client_id', userId)
+      .not('latitude', 'is', null)
+      .not('longitude', 'is', null)
+      .gte('latitude', latMin)
+      .lte('latitude', latMax)
+      .gte('longitude', lngMin)
+      .lte('longitude', lngMax)
+      .order('created_at', { ascending: false })
+      .limit(2000);
+
+    if (query.city?.trim()) {
+      geoQuery = geoQuery.ilike('city', `%${query.city.trim()}%`);
+    }
+
+    const { data: candidates, error: candidatesError } = await geoQuery;
+
+    if (candidatesError) {
+      throw new InternalServerErrorException(candidatesError.message);
+    }
+
+    const withDistance =
+      candidates
+        ?.map((row) => ({
+          id: row.id,
+          distance_km: this.haversineKm(
+            query.latitude!,
+            query.longitude!,
+            row.latitude!,
+            row.longitude!,
+          ),
+        }))
+        .filter((row) => row.distance_km <= query.radiusKm!)
+        .sort((a, b) => a.distance_km - b.distance_km) ?? [];
+
+    const total = withDistance.length;
+    const truncated = (candidates?.length ?? 0) >= 2000;
+    const pageSlice = withDistance.slice(offset, offset + limit);
+    const ids = pageSlice.map((r) => r.id);
+
+    if (ids.length === 0) {
+      return {
+        data: [],
+        page,
+        limit,
+        total: 0,
+        truncated,
+      };
+    }
+
+    const { data: fullRows, error: fullError } = await this.supabaseService.sb
+      .from('services')
+      .select(fullSelect)
+      .in('id', ids);
+
+    if (fullError) {
+      throw new InternalServerErrorException(fullError.message);
+    }
+
+    const orderMap = new Map(ids.map((id, idx) => [id, idx]));
+    const sortedFull = (fullRows ?? []).slice().sort((a, b) => {
+      const idA = String((a as { id: string }).id);
+      const idB = String((b as { id: string }).id);
+      return (orderMap.get(idA) ?? 0) - (orderMap.get(idB) ?? 0);
+    });
+
+    const data = sortedFull.map((row) => {
+      const meta = pageSlice.find((p) => p.id === row.id);
+      return {
+        ...row,
+        distance_km:
+          meta?.distance_km ??
+          this.haversineKm(
+            query.latitude!,
+            query.longitude!,
+            row.latitude!,
+            row.longitude!,
+          ),
+      };
+    });
+
+    return {
+      data,
+      page,
+      limit,
+      total,
+      truncated,
+    };
+  }
+
+  private assertOpportunitiesGeoParams(query: FindOpportunitiesQueryDto) {
+    const hasAny =
+      query.latitude != null ||
+      query.longitude != null ||
+      query.radiusKm != null;
+    const hasAll =
+      query.latitude != null &&
+      query.longitude != null &&
+      query.radiusKm != null;
+
+    if (hasAny && !hasAll) {
+      throw new BadRequestException(
+        'Para filtrar por zona geográfica debes enviar latitude, longitude y radiusKm juntos',
+      );
+    }
+  }
+
+  private geoBoundingBox(lat: number, lng: number, radiusKm: number) {
+    const latDelta = radiusKm / 111;
+    const cosLat = Math.cos((lat * Math.PI) / 180);
+    const lngDelta = radiusKm / Math.max(111 * cosLat, 0.01);
+
+    return {
+      latMin: lat - latDelta,
+      latMax: lat + latDelta,
+      lngMin: lng - lngDelta,
+      lngMax: lng + lngDelta,
+    };
+  }
+
+  private haversineKm(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
+    const R = 6371;
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 }
