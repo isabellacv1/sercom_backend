@@ -157,4 +157,113 @@ export class ProposalsService {
       })),
     };
   }
+  async acceptProposal(proposalId: string, clientId: string) {
+    // 1. Traer la propuesta
+    const proposalResponse = await this.supabaseService.sb
+      .from('proposals')
+      .select(
+        `
+        id,
+        service_id,
+        technician_id,
+        price,
+        available_date,
+        available_from,
+        available_to
+      `,
+      )
+      .eq('id', proposalId)
+      .maybeSingle();
+
+    if (proposalResponse.error) {
+      throw new InternalServerErrorException(proposalResponse.error.message);
+    }
+
+    if (!proposalResponse.data) {
+      throw new NotFoundException('La propuesta no existe');
+    }
+
+    const proposal = proposalResponse.data as any;
+
+    // 2. Validar servicio y ownership
+    const serviceResponse = await this.supabaseService.sb
+      .from('services')
+      .select('id, client_id, status')
+      .eq('id', proposal.service_id)
+      .maybeSingle();
+
+    if (serviceResponse.error) {
+      throw new InternalServerErrorException(serviceResponse.error.message);
+    }
+
+    if (!serviceResponse.data) {
+      throw new NotFoundException('El servicio no existe');
+    }
+
+    if (serviceResponse.data.client_id !== clientId) {
+      throw new ForbiddenException('No puedes aceptar esta propuesta');
+    }
+
+    // 3. Verificar si ya existe asignación
+    const existingAssignment = await this.supabaseService.sb
+      .from('service_assignments')
+      .select('id')
+      .eq('service_id', proposal.service_id)
+      .maybeSingle();
+
+    if (existingAssignment.error) {
+      throw new InternalServerErrorException(existingAssignment.error.message);
+    }
+
+    if (existingAssignment.data) {
+      throw new ConflictException('Este servicio ya tiene un trabajador asignado');
+    }
+
+    // 4. Crear asignación
+    const assignmentResponse = await this.supabaseService.sb
+      .from('service_assignments')
+      .insert([
+        {
+          service_id: proposal.service_id,
+          worker_id: proposal.technician_id,
+          status: 'accepted',
+          proposed_price: proposal.price,
+          assigned_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          available_date: proposal.available_date,
+          available_from: proposal.available_from,
+          available_to: proposal.available_to,
+        },
+      ])
+      .select()
+      .single();
+
+    if (assignmentResponse.error) {
+      throw new InternalServerErrorException(assignmentResponse.error.message);
+    }
+
+    // 5. Actualizar propuesta aceptada
+    await this.supabaseService.sb
+      .from('proposals')
+      .update({ status: 'accepted' })
+      .eq('id', proposalId);
+
+    // 6. Rechazar las demás (opcional pero MUY recomendado)
+    await this.supabaseService.sb
+      .from('proposals')
+      .update({ status: 'rejected' })
+      .eq('service_id', proposal.service_id)
+      .neq('id', proposalId);
+
+    // 7. Actualizar servicio
+    await this.supabaseService.sb
+      .from('services')
+      .update({ status: 'in_progress' })
+      .eq('id', proposal.service_id);
+
+    return {
+      message: 'Propuesta aceptada y trabajador asignado',
+      assignment: assignmentResponse.data,
+    };
+  }
 }

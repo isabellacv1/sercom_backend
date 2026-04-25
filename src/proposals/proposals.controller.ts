@@ -24,4 +24,11 @@ export class ProposalsController {
   ) {
     return this.proposalsService.findByServiceForClient(serviceId, user.sub);
   }
+  @Post(':proposalId/accept')
+  acceptProposal(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('proposalId') proposalId: string,
+  ) {
+    return this.proposalsService.acceptProposal(proposalId, user.sub);
+  }
 }
