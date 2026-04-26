@@ -149,6 +149,9 @@ export class ProfilesService {
     if (error) throw new InternalServerErrorException(error.message);
 
     if (!profile.roles?.includes(active_role)) {
+      if (active_role === AppRoles.WORKER) {
+        throw new BadRequestException('USER_NOT_ACTIVATED_AS_WORKER');
+      }
       throw new BadRequestException('No tienes ese rol');
     }
 

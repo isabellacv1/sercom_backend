@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Patch, UseGuards, BadRequestException } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Auth } from 'src/auth/decorators/auth.decorator';
@@ -31,9 +31,14 @@ export class ProfilesController {
   @Patch('me/active-role')
   async changeActiveRole(
     @CurrentUser() user: JwtUser,
-    @Body() dto: { active_role: AppRoles },
+    @Body() dto: { active_role?: AppRoles | 'technician'; role?: AppRoles | 'technician' },
   ) {
-    return this.usersService.changeActiveRole(user, dto.active_role);
+    const sentRole = dto.active_role || dto.role;
+    if (!sentRole) {
+      throw new BadRequestException('El campo active_role o role es requerido');
+    }
+    const roleToSet = sentRole === 'technician' ? AppRoles.WORKER : sentRole;
+    return this.usersService.changeActiveRole(user, roleToSet as AppRoles);
   }
 
   @Auth()

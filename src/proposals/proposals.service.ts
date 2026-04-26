@@ -30,8 +30,8 @@ export class ProposalsService {
     }
 
     const { status } = serviceResponse.data;
-    if (status === 'completed' || status === 'cancelled') {
-      throw new BadRequestException('No puedes enviar propuestas a un servicio cerrado');
+    if (status !== 'requested') {
+      throw new BadRequestException('El servicio no está recibiendo postulaciones');
     }
 
     // 2. Check for duplicate proposals by this technician for this service
@@ -75,9 +75,27 @@ export class ProposalsService {
       throw new InternalServerErrorException(error.message);
     }
 
+    if (!data) {
+      throw new InternalServerErrorException('Error al crear la propuesta');
+    }
+
+    const insertedProposal = data as any;
+
     return {
       message: 'Propuesta creada exitosamente',
-      proposal: data,
+      proposal: {
+        id: insertedProposal.id,
+        serviceId: insertedProposal.service_id,
+        technicianId: insertedProposal.technician_id,
+        price: Number(insertedProposal.price),
+        message: insertedProposal.message,
+        estimatedDuration: insertedProposal.estimated_duration,
+        status: insertedProposal.status,
+        createdAt: new Date(insertedProposal.created_at),
+        availableDate: insertedProposal.available_date,
+        availableFrom: insertedProposal.available_from,
+        availableTo: insertedProposal.available_to,
+      },
     };
   }
   async findByServiceForClient(serviceId: string, clientId: string) {
@@ -139,19 +157,20 @@ export class ProposalsService {
       proposals: proposalsResponse.data.map((proposal: any) => ({
         id: proposal.id,
         serviceId: proposal.service_id,
-        price: proposal.price,
-        description: proposal.message,
-        estimatedTime: proposal.estimated_duration,
+        technicianId: proposal.technician_id,
+        price: Number(proposal.price),
+        message: proposal.message,
+        estimatedDuration: proposal.estimated_duration,
         status: proposal.status,
-        createdAt: proposal.created_at,
+        createdAt: new Date(proposal.created_at),
         availableDate: proposal.available_date,
         availableFrom: proposal.available_from,
         availableTo: proposal.available_to,
         worker: {
           id: proposal.technician_id,
           name: proposal.profiles?.full_name ?? null,
-          rating: proposal.profiles?.rating_avg ?? null,
-          ratingCount: proposal.profiles?.rating_count ?? 0,
+          rating: Number(proposal.profiles?.rating_avg ?? 0),
+          ratingCount: Number(proposal.profiles?.rating_count ?? 0),
           profileImageUrl: proposal.profiles?.profile_image_url ?? null,
         },
       })),
