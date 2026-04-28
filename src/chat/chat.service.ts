@@ -84,12 +84,13 @@ export class ChatService {
     return data;
     }
 
-  async markMessagesAsRead(roomId: string, userId: string) {
+ async markMessagesAsRead(roomId: string, userId: string) {
     const { error } = await this.supabase
         .from('chat_messages')
         .update({ is_read: true })
         .eq('room_id', roomId)
-        .neq('sender_id', userId);
+        .neq('sender_id', userId)
+        .eq('is_read', false);
 
     if (error) {
         throw new BadRequestException('Error al marcar mensajes como leídos');
