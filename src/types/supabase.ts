@@ -227,6 +227,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          active_role: string | null
           address: string | null
           city: string | null
           created_at: string
@@ -238,11 +239,12 @@ export type Database = {
           profile_image_url: string | null
           rating_avg: number | null
           rating_count: number | null
-          role: Database["public"]["Enums"]["user_role"]
+          roles: string[]
           status: Database["public"]["Enums"]["profile_status"]
           updated_at: string
         }
         Insert: {
+          active_role?: string | null
           address?: string | null
           city?: string | null
           created_at?: string
@@ -254,11 +256,12 @@ export type Database = {
           profile_image_url?: string | null
           rating_avg?: number | null
           rating_count?: number | null
-          role?: Database["public"]["Enums"]["user_role"]
+          roles?: string[]
           status?: Database["public"]["Enums"]["profile_status"]
           updated_at?: string
         }
         Update: {
+          active_role?: string | null
           address?: string | null
           city?: string | null
           created_at?: string
@@ -270,7 +273,7 @@ export type Database = {
           profile_image_url?: string | null
           rating_avg?: number | null
           rating_count?: number | null
-          role?: Database["public"]["Enums"]["user_role"]
+          roles?: string[]
           status?: Database["public"]["Enums"]["profile_status"]
           updated_at?: string
         }

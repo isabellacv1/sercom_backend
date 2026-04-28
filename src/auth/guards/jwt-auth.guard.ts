@@ -5,10 +5,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { createLocalJWKSet, jwtVerify, JWTPayload } from 'jose';
+import { createLocalJWKSet, jwtVerify } from 'jose';
 
 type AuthenticatedRequest = Request & {
-  user?: JWTPayload;
+  user?: {
+    sub: string;
+    email?: string;
+  };
 };
 
 @Injectable()
@@ -22,47 +25,38 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const token = authHeader.substring(7);
-
     const supabaseUrl = process.env.SUPABASE_URL;
 
     if (!supabaseUrl) {
-      throw new UnauthorizedException(
-        'Falta configuración de Supabase en el servidor',
-      );
+      throw new UnauthorizedException('Supabase no configurado');
     }
 
     try {
       const jwksUrl = `${supabaseUrl}/auth/v1/.well-known/jwks.json`;
-      console.log('JWKS URL:', jwksUrl);
-
-      const response = await fetch(jwksUrl);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('JWKS ERROR:', response.status, errorText);
-        throw new UnauthorizedException(
-          'No se pudieron obtener las claves públicas',
-        );
+      console.log('Fetching JWKS from:', jwksUrl);
+      const jwksResponse = await fetch(jwksUrl);
+      if (!jwksResponse.ok) {
+        console.error('Failed to fetch JWKS:', jwksResponse.statusText);
       }
-
-      const jwks = await response.json();
+      const jwks = await jwksResponse.json();
       const localJwks = createLocalJWKSet(jwks);
 
-      const { payload } = await jwtVerify(token, localJwks, {
-        issuer: `${supabaseUrl}/auth/v1`,
-        audience: 'authenticated',
-      });
+      // Decoding for debug
+      const { decodeJwt } = await import('jose');
+      const decoded = decodeJwt(token);
+      console.log('JWT Decoded Payload:', decoded);
 
-      request.user = payload;
+      const { payload } = await jwtVerify(token, localJwks);
+
+      request.user = {
+        sub: payload.sub as string,
+        email: payload.email as string,
+      };
+
       return true;
-    } catch (error) {
-      console.error('JWT ERROR:', error);
-
-      if (error instanceof UnauthorizedException) {
-        throw error;
-      }
-
-      throw new UnauthorizedException('Invalid token');
+    } catch (err) {
+      console.error('JWT Verification Error:', err);
+      throw new UnauthorizedException(`Token inválido: ${err.message}`);
     }
   }
 }
