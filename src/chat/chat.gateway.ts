@@ -42,7 +42,17 @@ export class ChatGateway implements OnGatewayConnection {
     client.join(data.roomId);
 
     return { message: `Unido a la sala ${data.roomId}` };
-  } 
+  }
+  
+  @SubscribeMessage('leaveRoom')
+  handleLeaveRoom(
+    @MessageBody() data: { roomId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    client.leave(data.roomId);
+
+    return { message: `Saliste de la sala ${data.roomId}` };
+  }
 
   @SubscribeMessage('sendMessage')
   async handleSendMessage(
