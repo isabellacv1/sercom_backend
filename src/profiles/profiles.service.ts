@@ -118,7 +118,7 @@ export class ProfilesService {
 
     const validRoles = Object.values(AppRoles);
 
-    const isValid = roles.every(role => validRoles.includes(role));
+    const isValid = roles.every((role) => validRoles.includes(role));
 
     if (!isValid) {
       throw new BadRequestException('Roles inválidos');
@@ -162,7 +162,8 @@ export class ProfilesService {
       .select()
       .single();
 
-    if (updateError) throw new InternalServerErrorException(updateError.message);
+    if (updateError)
+      throw new InternalServerErrorException(updateError.message);
 
     return data;
   }

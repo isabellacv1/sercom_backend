@@ -19,7 +19,6 @@ export class ServiceOptionsService {
     return data;
   }
 
-
   async findOne(id: string) {
     const { data, error } = await this.supabaseService.sb
       .from('service_options')

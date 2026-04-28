@@ -31,7 +31,9 @@ export class ProposalsService {
 
     const { status } = serviceResponse.data;
     if (status !== 'requested') {
-      throw new BadRequestException('El servicio no está recibiendo postulaciones');
+      throw new BadRequestException(
+        'El servicio no está recibiendo postulaciones',
+      );
     }
 
     // 2. Check for duplicate proposals by this technician for this service
@@ -43,11 +45,15 @@ export class ProposalsService {
       .maybeSingle();
 
     if (existingProposalResponse.error) {
-      throw new InternalServerErrorException(existingProposalResponse.error.message);
+      throw new InternalServerErrorException(
+        existingProposalResponse.error.message,
+      );
     }
 
     if (existingProposalResponse.data) {
-      throw new ConflictException('Ya has enviado una propuesta para este servicio');
+      throw new ConflictException(
+        'Ya has enviado una propuesta para este servicio',
+      );
     }
 
     // 3. Insert the proposal
@@ -224,7 +230,9 @@ export class ProposalsService {
     }
 
     if (serviceResponse.data.status !== 'requested') {
-      throw new ConflictException('Este servicio ya no recibe propuestas o ya fue asignado');
+      throw new ConflictException(
+        'Este servicio ya no recibe propuestas o ya fue asignado',
+      );
     }
 
     // 3. Verificar si ya existe asignación
@@ -239,7 +247,9 @@ export class ProposalsService {
     }
 
     if (existingAssignment.data) {
-      throw new ConflictException('Este servicio ya tiene un trabajador asignado');
+      throw new ConflictException(
+        'Este servicio ya tiene un trabajador asignado',
+      );
     }
 
     // 4. Crear asignación
@@ -290,7 +300,10 @@ export class ProposalsService {
     };
   }
 
-  async findMineForWorker(technicianId: string, status?: 'pending' | 'accepted') {
+  async findMineForWorker(
+    technicianId: string,
+    status?: 'pending' | 'accepted',
+  ) {
     // Build query: proposals JOIN services JOIN service_categories
     let query = this.supabaseService.sb
       .from('proposals')

@@ -10,18 +10,185 @@ import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
 import { Database } from '../types/supabase';
+import { WorkerOpportunitiesResponseDto } from './dto/worker-opportunity-card.dto';
 
 type ServiceUpdate = Database['public']['Tables']['services']['Update'];
 export type ServiceStatus = Database['public']['Enums']['service_status'];
+type ProfileRow = Database['public']['Tables']['profiles']['Row'];
+type WorkerSkillRow = Database['public']['Tables']['worker_skills']['Row'];
+type UrgencyLevel = Database['public']['Enums']['urgency_level'];
+type WorkerProfileForOpportunities = Pick<
+  ProfileRow,
+  'id' | 'city' | 'is_active' | 'status' | 'roles' | 'active_role'
+>;
+type WorkerSkillForOpportunities = Pick<WorkerSkillRow, 'category_id'>;
+type ServiceProposalForOpportunity = {
+  technician_id: string;
+};
+type WorkerCandidate = {
+  active_role: string | null;
+  city: string | null;
+  is_active: boolean;
+  status: Database['public']['Enums']['profile_status'];
+};
+type WorkerSkillCandidate = {
+  worker: WorkerCandidate | null;
+};
+type ServiceForOpportunity = {
+  id: string;
+  client_id: string;
+  title: string;
+  address: string;
+  city: string | null;
+  status: ServiceStatus;
+  budget_min: number | null;
+  budget_max: number | null;
+  scheduled_at: string | null;
+  urgency_level: UrgencyLevel | null;
+  assigned_worker_id: string | null;
+  created_at: string;
+  category: { name: string } | null;
+  service_option: { title: string } | null;
+  proposals: ServiceProposalForOpportunity[] | null;
+};
+type MissionRawRow = {
+  proposals?: Array<{ count?: number | null }> | null;
+  budget_min: number | null;
+  budget_max: number | null;
+  category?: { name?: string | null } | null;
+  status: ServiceStatus;
+  created_at: string;
+} & Record<string, unknown>;
 
 @Injectable()
 export class ServicesService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  async createPreRequest(
-    clientId: string,
-    dto: CreatePreServiceRequestDto,
-  ) {
+  async findAvailableOpportunities(
+    workerId: string,
+  ): Promise<WorkerOpportunitiesResponseDto> {
+    const workerResponse = await this.supabaseService.sb
+      .from('profiles')
+      .select('id, city, is_active, status, roles, active_role')
+      .eq('id', workerId)
+      .maybeSingle();
+
+    if (workerResponse.error) {
+      throw new InternalServerErrorException(workerResponse.error.message);
+    }
+
+    const worker = workerResponse.data as WorkerProfileForOpportunities | null;
+    if (!worker) {
+      throw new NotFoundException('Trabajador no encontrado');
+    }
+
+    const hasWorkerRole =
+      Array.isArray(worker.roles) && worker.roles.includes('worker');
+    if (
+      !hasWorkerRole ||
+      worker.active_role !== 'worker' ||
+      !worker.is_active ||
+      worker.status !== 'verified'
+    ) {
+      throw new ForbiddenException(
+        'Solo trabajadores verificados y activos pueden ver oportunidades',
+      );
+    }
+
+    const skillsResponse = await this.supabaseService.sb
+      .from('worker_skills')
+      .select('category_id')
+      .eq('worker_id', workerId)
+      .eq('is_active', true);
+
+    if (skillsResponse.error) {
+      throw new InternalServerErrorException(skillsResponse.error.message);
+    }
+
+    const skills = (skillsResponse.data ?? []) as WorkerSkillForOpportunities[];
+    const categoryIds = [
+      ...new Set(
+        skills
+          .map((item) => item.category_id)
+          .filter((categoryId): categoryId is string => Boolean(categoryId)),
+      ),
+    ];
+    if (categoryIds.length === 0) {
+      return {
+        refreshed_at: new Date().toISOString(),
+        total: 0,
+        opportunities: [],
+      };
+    }
+
+    const servicesResponse = await this.supabaseService.sb
+      .from('services')
+      .select(
+        `
+        id,
+        client_id,
+        title,
+        address,
+        city,
+        status,
+        budget_min,
+        budget_max,
+        scheduled_at,
+        urgency_level,
+        assigned_worker_id,
+        created_at,
+        category:service_categories(name),
+        service_option:service_options(title),
+        proposals:proposals(technician_id)
+      `,
+      )
+      .eq('status', 'requested')
+      .is('assigned_worker_id', null)
+      .neq('client_id', workerId)
+      .in('category_id', categoryIds)
+      .order('created_at', { ascending: false });
+
+    if (servicesResponse.error) {
+      throw new InternalServerErrorException(servicesResponse.error.message);
+    }
+
+    const workerCity = this.normalizeZone(worker.city);
+
+    const services = (servicesResponse.data ?? []) as ServiceForOpportunity[];
+    const opportunities = services
+      .filter((service) =>
+        this.isServiceAvailableOpportunity(service, workerId, workerCity),
+      )
+      .map((service) => ({
+        service_id: service.id,
+        title: service.title,
+        type:
+          service.service_option?.title ??
+          service.category?.name ??
+          'Servicio general',
+        location: {
+          address: service.address,
+          city: service.city ?? null,
+          zone: service.city ?? null,
+        },
+        date: service.scheduled_at ?? null,
+        price: {
+          min: service.budget_min ?? null,
+          max: service.budget_max ?? null,
+          currency: 'COP' as const,
+        },
+        urgency_level: service.urgency_level ?? null,
+        created_at: service.created_at,
+      }));
+
+    return {
+      refreshed_at: new Date().toISOString(),
+      total: opportunities.length,
+      opportunities,
+    };
+  }
+
+  async createPreRequest(clientId: string, dto: CreatePreServiceRequestDto) {
     const categoryResponse = await this.supabaseService.sb
       .from('service_categories')
       .select('id, name, description, icon, is_active')
@@ -180,7 +347,10 @@ export class ServicesService {
       throw new InternalServerErrorException(historyError.message);
     }
 
-    const candidateWorkers = await this.findCandidateWorkers(clientId, serviceId);
+    const candidateWorkers = await this.findCandidateWorkers(
+      clientId,
+      serviceId,
+    );
 
     return {
       message: 'Pre-solicitud completada exitosamente',
@@ -464,11 +634,13 @@ export class ServicesService {
         scheduled_at: dto.scheduled_at ?? null,
         status: 'requested',
       })
-      .select(`
+      .select(
+        `
         *,
         category:service_categories(id, name, description, icon),
         service_option:service_options(id, category_id, title, description, specialist_level)
-      `)
+      `,
+      )
       .single();
 
     const data = createResponse.data;
@@ -512,11 +684,13 @@ export class ServicesService {
   async findMine(clientId: string) {
     const response = await this.supabaseService.sb
       .from('services')
-      .select(`
+      .select(
+        `
         *,
         category:service_categories(id, name, description, icon),
         service_option:service_options(id, category_id, title, description, specialist_level)
-      `)
+      `,
+      )
       .eq('client_id', clientId)
       .order('created_at', { ascending: false });
 
@@ -533,11 +707,13 @@ export class ServicesService {
   async findOneMine(clientId: string, serviceId: string) {
     const response = await this.supabaseService.sb
       .from('services')
-      .select(`
+      .select(
+        `
         *,
         category:service_categories(id, name, description, icon),
         service_option:service_options(id, category_id, title, description, specialist_level)
-      `)
+      `,
+      )
       .eq('id', serviceId)
       .eq('client_id', clientId)
       .maybeSingle();
@@ -556,28 +732,29 @@ export class ServicesService {
     return data;
   }
 
- async findCandidateWorkers(clientId: string, serviceId: string) {
-  const serviceResponse = await this.supabaseService.sb
-    .from('services')
-    .select('*')
-    .eq('id', serviceId)
-    .eq('client_id', clientId)
-    .maybeSingle();
+  async findCandidateWorkers(clientId: string, serviceId: string) {
+    const serviceResponse = await this.supabaseService.sb
+      .from('services')
+      .select('*')
+      .eq('id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
 
-  const service = serviceResponse.data;
-  const serviceError = serviceResponse.error;
+    const service = serviceResponse.data;
+    const serviceError = serviceResponse.error;
 
-  if (serviceError) {
-    throw new InternalServerErrorException(serviceError.message);
-  }
+    if (serviceError) {
+      throw new InternalServerErrorException(serviceError.message);
+    }
 
-  if (!service) {
-    throw new NotFoundException('Servicio no encontrado');
-  }
+    if (!service) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
 
-  const workersResponse = await this.supabaseService.sb
-    .from('worker_skills')
-    .select(`
+    const workersResponse = await this.supabaseService.sb
+      .from('worker_skills')
+      .select(
+        `
       id,
       years_experience,
       base_price,
@@ -599,49 +776,46 @@ export class ServicesService {
         id,
         name
       )
-    `)
-    .eq('category_id', service.category_id)
-    .eq('is_active', true);
+    `,
+      )
+      .eq('category_id', service.category_id)
+      .eq('is_active', true);
 
-  const workers = workersResponse.data;
-  const workersError = workersResponse.error;
+    const workers = (workersResponse.data ?? []) as WorkerSkillCandidate[];
+    const workersError = workersResponse.error;
 
-  if (workersError) {
-    throw new InternalServerErrorException(workersError.message);
-  }
-
-const filteredWorkers =
-  workers?.filter((item: any) => {
-    const worker = item.worker;
-
-    if (!worker) return false;
-    if (worker.active_role !== 'worker') return false;
-    if (!worker.is_active) return false;
-    if (worker.status !== 'verified') return false;
-
-    if (service.city && worker.city) {
-      return (
-        worker.city.trim().toLowerCase() ===
-        service.city.trim().toLowerCase()
-      );
+    if (workersError) {
+      throw new InternalServerErrorException(workersError.message);
     }
 
-    return true;
-  }) ?? [];
+    const filteredWorkers = workers.filter((item) => {
+      const worker = item.worker;
 
-  return {
-    service_id: service.id,
-    category_id: service.category_id,
-    service_option_id: service.service_option_id,
-    city: service.city,
-    candidates: filteredWorkers,
-  };
-}
+      if (!worker) return false;
+      if (worker.active_role !== 'worker') return false;
+      if (!worker.is_active) return false;
+      if (worker.status !== 'verified') return false;
+
+      if (service.city && worker.city) {
+        return (
+          worker.city.trim().toLowerCase() === service.city.trim().toLowerCase()
+        );
+      }
+
+      return true;
+    });
+
+    return {
+      service_id: service.id,
+      category_id: service.category_id,
+      service_option_id: service.service_option_id,
+      city: service.city,
+      candidates: filteredWorkers,
+    };
+  }
 
   async findMissions(statusFilter: string, userId: string): Promise<any[]> {
-    let query = this.supabaseService.sb
-      .from('services')
-      .select(`
+    let query = this.supabaseService.sb.from('services').select(`
         *,
         category:service_categories(id, name, description, icon),
         proposals:proposals(count)
@@ -657,13 +831,16 @@ const filteredWorkers =
       query = query.eq('assigned_worker_id', userId).eq('status', 'completed');
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('created_at', {
+      ascending: false,
+    });
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data.map((service: any) => {
+    const services = (data ?? []) as MissionRawRow[];
+    return services.map((service) => {
       const proposalsCount = service.proposals?.[0]?.count ?? 0;
       return {
         ...service,
@@ -702,5 +879,30 @@ const filteredWorkers =
     if (hours < 24) return `Hace ${hours} horas`;
     const days = Math.floor(hours / 24);
     return `Hace ${days} días`;
+  }
+
+  private normalizeZone(zone?: string | null): string | null {
+    if (!zone) return null;
+    return zone.trim().toLowerCase();
+  }
+
+  private isServiceAvailableOpportunity(
+    service: ServiceForOpportunity,
+    workerId: string,
+    workerZone: string | null,
+  ): boolean {
+    if (service.status !== 'requested') return false;
+    if (service.assigned_worker_id) return false;
+    if (service.client_id === workerId) return false;
+
+    const alreadyApplied = (service.proposals ?? []).some(
+      (proposal) => proposal.technician_id === workerId,
+    );
+    if (alreadyApplied) return false;
+
+    if (!workerZone) return true;
+
+    const serviceZone = this.normalizeZone(service.city);
+    return Boolean(serviceZone && serviceZone === workerZone);
   }
 }
