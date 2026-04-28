@@ -13,7 +13,7 @@ import { FindOpportunitiesQueryDto } from './dto/find-opportunities-query.dto';
 import { Database } from '../types/supabase';
 
 type ServiceUpdate = Database['public']['Tables']['services']['Update'];
-type ServiceStatus = Database['public']['Enums']['service_status'];
+export type ServiceStatus = Database['public']['Enums']['service_status'];
 
 type CandidateWorkerProfile = Pick<
   Database['public']['Tables']['profiles']['Row'],
@@ -398,7 +398,7 @@ export class ServicesService {
       .from('profiles')
       .select('*')
       .eq('id', workerId)
-      .eq('role', 'worker')
+      .contains('roles', ['worker'])
       .eq('is_active', true)
       .eq('status', 'verified')
       .maybeSingle();
@@ -610,56 +610,74 @@ export class ServicesService {
     return data;
   }
 
-  async findCandidateWorkers(clientId: string, serviceId: string) {
-    const serviceResponse = await this.supabaseService.sb
-      .from('services')
-      .select('*')
-      .eq('id', serviceId)
-      .eq('client_id', clientId)
-      .maybeSingle();
+ async findCandidateWorkers(clientId: string, serviceId: string) {
+  const serviceResponse = await this.supabaseService.sb
+    .from('services')
+    .select('*')
+    .eq('id', serviceId)
+    .eq('client_id', clientId)
+    .maybeSingle();
 
-    const service = serviceResponse.data;
-    const serviceError = serviceResponse.error;
+  const service = serviceResponse.data;
+  const serviceError = serviceResponse.error;
 
-    if (serviceError) {
-      throw new InternalServerErrorException(serviceError.message);
-    }
+  if (serviceError) {
+    throw new InternalServerErrorException(serviceError.message);
+  }
 
-    if (!service) {
-      throw new NotFoundException('Servicio no encontrado');
-    }
+  if (!service) {
+    throw new NotFoundException('Servicio no encontrado');
+  }
 
-    const workersResponse = await this.supabaseService.sb
-      .from('worker_skills')
-      .select(`
+  const workersResponse = await this.supabaseService.sb
+    .from('worker_skills')
+    .select(`
+      id,
+      years_experience,
+      base_price,
+      is_active,
+      worker:profiles!worker_skills_worker_id_fkey(
         id,
-        years_experience,
-        base_price,
+        full_name,
+        email,
+        city,
+        rating_avg,
+        rating_count,
+        profile_image_url,
         is_active,
-        worker:profiles!worker_skills_worker_id_fkey(
-          id,
-          full_name,
-          email,
-          city,
-          rating_avg,
-          rating_count,
-          profile_image_url,
-          is_active,
-          status,
-          role
-        ),
-        category:service_categories(
-          id,
-          name
-        )
-      `)
-      .eq('category_id', service.category_id)
-      .eq('is_active', true);
+        status,
+        active_role,
+        roles
+      ),
+      category:service_categories(
+        id,
+        name
+      )
+    `)
+    .eq('category_id', service.category_id)
+    .eq('is_active', true);
 
-    const workersError = workersResponse.error;
+  const workers = workersResponse.data;
+  const workersError = workersResponse.error;
 
-    if (workersError) {
-      throw new InternalServerErrorException(workersError.message);
+  if (workersError) {
+    throw new InternalServerErrorException(workersError.message);
+  }
+
+const filteredWorkers =
+  workers?.filter((item: any) => {
+    const worker = item.worker;
+
+    if (!worker) return false;
+    if (worker.active_role !== 'worker') return false;
+    if (!worker.is_active) return false;
+    if (worker.status !== 'verified') return false;
+
+    if (service.city && worker.city) {
+      return (
+        worker.city.trim().toLowerCase() ===
+        service.city.trim().toLowerCase()
+      );
     }
 
     const workersRaw: unknown = workersResponse.data;
@@ -675,25 +693,85 @@ export class ServicesService {
         if (worker.role !== 'worker') return false;
         if (!worker.is_active) return false;
         if (worker.status !== 'verified') return false;
+    return true;
+  }) ?? [];
 
-        if (service.city && worker.city) {
-          return (
-            worker.city.trim().toLowerCase() ===
-            service.city.trim().toLowerCase()
-          );
-        }
+  return {
+    service_id: service.id,
+    category_id: service.category_id,
+    service_option_id: service.service_option_id,
+    city: service.city,
+    candidates: filteredWorkers,
+  };
+}
+
+  async findMissions(statusFilter: string, userId: string): Promise<any[]> {
+    let query = this.supabaseService.sb
+      .from('services')
+      .select(`
+        *,
+        category:service_categories(id, name, description, icon),
+        proposals:proposals(count)
+      `);
+
+    if (statusFilter === 'active') {
+      query = query.eq('status', 'requested');
+    } else if (statusFilter === 'in_progress') {
+      query = query
+        .or('status.eq.assigned,status.eq.on_the_way,status.eq.in_progress')
+        .eq('assigned_worker_id', userId);
+    } else if (statusFilter === 'history') {
+      query = query.eq('assigned_worker_id', userId).eq('status', 'completed');
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
 
         return true;
       },
     );
+    return data.map((service: any) => {
+      const proposalsCount = service.proposals?.[0]?.count ?? 0;
+      return {
+        ...service,
+        price_min: service.budget_min,
+        price_max: service.budget_max,
+        category_name: service.category?.name || 'General',
+        proposals_count: proposalsCount,
+        offer_count: proposalsCount,
+        status_label: this.getStatusLabel(service.status),
+        created_at_relative: this.getRelativeTime(new Date(service.created_at)),
+      };
+    });
+  }
 
-    return {
-      service_id: service.id,
-      category_id: service.category_id,
-      service_option_id: service.service_option_id,
-      city: service.city,
-      candidates: filteredWorkers,
+  private getStatusLabel(status: ServiceStatus): string {
+    const labels: Record<ServiceStatus, string> = {
+      requested: 'Recibiendo postulaciones',
+      assigned: 'Asignada',
+      on_the_way: 'En camino',
+      in_progress: 'En ejecución',
+      completed: 'Completada',
+      cancelled: 'Cancelada',
+      draft: 'Borrador',
     };
+    return labels[status] || status;
+  }
+
+  private getRelativeTime(date: Date): string {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return 'Hace un momento';
+    const mins = Math.floor(diffInSeconds / 60);
+    if (mins < 60) return `Hace ${mins} min`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `Hace ${hours} horas`;
+    const days = Math.floor(hours / 24);
+    return `Hace ${days} días`;
   }
 
   /**
