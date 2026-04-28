@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as currentUserDecorator from '../auth/decorators/current-user.decorator';
 import { CreateProposalDto } from './dto/create-proposal.dto';
@@ -22,7 +30,11 @@ export class ProposalsController {
   async findByService(
     @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
     @Param('serviceId') serviceId: string,
-  ): Promise<{ message: string; total: number; proposals: ProposalResponseDto[] }> {
+  ): Promise<{
+    message: string;
+    total: number;
+    proposals: ProposalResponseDto[];
+  }> {
     return this.proposalsService.findByServiceForClient(serviceId, user.sub);
   }
   @Get('mine')

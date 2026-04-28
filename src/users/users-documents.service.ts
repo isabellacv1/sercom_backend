@@ -7,7 +7,8 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { Database } from '../types/supabase';
 
-type UserDocumentInsert = Database['public']['Tables']['user_documents']['Insert'];
+type UserDocumentInsert =
+  Database['public']['Tables']['user_documents']['Insert'];
 
 @Injectable()
 export class UsersDocumentsService {
