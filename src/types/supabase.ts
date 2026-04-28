@@ -229,12 +229,14 @@ export type Database = {
         Row: {
           active_role: string | null
           address: string | null
+          bio: string | null
           city: string | null
           created_at: string
           email: string
           full_name: string
           id: string
           is_active: boolean
+          is_published: boolean
           phone: string | null
           profile_image_url: string | null
           rating_avg: number | null
@@ -246,12 +248,14 @@ export type Database = {
         Insert: {
           active_role?: string | null
           address?: string | null
+          bio?: string | null
           city?: string | null
           created_at?: string
           email: string
           full_name: string
           id: string
           is_active?: boolean
+          is_published?: boolean
           phone?: string | null
           profile_image_url?: string | null
           rating_avg?: number | null
@@ -263,12 +267,14 @@ export type Database = {
         Update: {
           active_role?: string | null
           address?: string | null
+          bio?: string | null
           city?: string | null
           created_at?: string
           email?: string
           full_name?: string
           id?: string
           is_active?: boolean
+          is_published?: boolean
           phone?: string | null
           profile_image_url?: string | null
           rating_avg?: number | null
@@ -281,6 +287,9 @@ export type Database = {
       }
       proposals: {
         Row: {
+          available_date: string | null
+          available_from: string | null
+          available_to: string | null
           created_at: string
           estimated_duration: string | null
           id: string
@@ -292,6 +301,9 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          available_date?: string | null
+          available_from?: string | null
+          available_to?: string | null
           created_at?: string
           estimated_duration?: string | null
           id?: string
@@ -303,6 +315,9 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          available_date?: string | null
+          available_from?: string | null
+          available_to?: string | null
           created_at?: string
           estimated_duration?: string | null
           id?: string
@@ -661,6 +676,7 @@ export type Database = {
           cancelled_at: string | null
           category_id: string
           city: string | null
+          client_confirmation: boolean
           client_id: string
           completed_at: string | null
           created_at: string
@@ -674,6 +690,7 @@ export type Database = {
           title: string
           updated_at: string
           urgency_level: Database["public"]["Enums"]["urgency_level"] | null
+          worker_confirmation: boolean
         }
         Insert: {
           address: string
@@ -683,6 +700,7 @@ export type Database = {
           cancelled_at?: string | null
           category_id: string
           city?: string | null
+          client_confirmation?: boolean
           client_id: string
           completed_at?: string | null
           created_at?: string
@@ -696,6 +714,7 @@ export type Database = {
           title: string
           updated_at?: string
           urgency_level?: Database["public"]["Enums"]["urgency_level"] | null
+          worker_confirmation?: boolean
         }
         Update: {
           address?: string
@@ -705,6 +724,7 @@ export type Database = {
           cancelled_at?: string | null
           category_id?: string
           city?: string | null
+          client_confirmation?: boolean
           client_id?: string
           completed_at?: string | null
           created_at?: string
@@ -718,6 +738,7 @@ export type Database = {
           title?: string
           updated_at?: string
           urgency_level?: Database["public"]["Enums"]["urgency_level"] | null
+          worker_confirmation?: boolean
         }
         Relationships: [
           {
@@ -798,6 +819,73 @@ export type Database = {
           {
             foreignKeyName: "user_documents_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      worker_coverage_zones: {
+        Row: {
+          created_at: string
+          id: string
+          worker_id: string
+          zone_id: string
+          zone_name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          worker_id: string
+          zone_id: string
+          zone_name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          worker_id?: string
+          zone_id?: string
+          zone_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "worker_coverage_zones_worker_id_fkey"
+            columns: ["worker_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      worker_portfolio_items: {
+        Row: {
+          created_at: string
+          file_type: string
+          file_url: string
+          id: string
+          title: string | null
+          worker_id: string
+        }
+        Insert: {
+          created_at?: string
+          file_type: string
+          file_url: string
+          id?: string
+          title?: string | null
+          worker_id: string
+        }
+        Update: {
+          created_at?: string
+          file_type?: string
+          file_url?: string
+          id?: string
+          title?: string | null
+          worker_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "worker_portfolio_items_worker_id_fkey"
+            columns: ["worker_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
