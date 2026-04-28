@@ -265,6 +265,23 @@ export class ProposalsService {
       throw new InternalServerErrorException(assignmentResponse.error.message);
     }
 
+    const chatRoomResponse = await this.supabaseService.sb
+      .from('chat_rooms')
+      .upsert(
+        {
+          service_id: proposal.service_id,
+          client_id: clientId,
+          worker_id: proposal.technician_id,
+        },
+        { onConflict: 'service_id' },
+      )
+      .select()
+      .single();
+
+    if (chatRoomResponse.error) {
+      throw new InternalServerErrorException(chatRoomResponse.error.message);
+    }
+
     // 5. Actualizar propuesta aceptada
     await this.supabaseService.sb
       .from('proposals')
@@ -287,6 +304,7 @@ export class ProposalsService {
     return {
       message: 'Propuesta aceptada y trabajador asignado',
       assignment: assignmentResponse.data,
+      chatRoom: chatRoomResponse.data,
     };
   }
 
