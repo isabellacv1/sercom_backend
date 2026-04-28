@@ -223,6 +223,10 @@ export class ProposalsService {
       throw new ForbiddenException('No puedes aceptar esta propuesta');
     }
 
+    if (serviceResponse.data.status !== 'requested') {
+      throw new ConflictException('Este servicio ya no recibe propuestas o ya fue asignado');
+    }
+
     // 3. Verificar si ya existe asignación
     const existingAssignment = await this.supabaseService.sb
       .from('service_assignments')
@@ -277,12 +281,111 @@ export class ProposalsService {
     // 7. Actualizar servicio
     await this.supabaseService.sb
       .from('services')
-      .update({ status: 'in_progress' })
+      .update({ status: 'assigned' })
       .eq('id', proposal.service_id);
 
     return {
       message: 'Propuesta aceptada y trabajador asignado',
       assignment: assignmentResponse.data,
     };
+  }
+
+  async findMineForWorker(technicianId: string, status?: 'pending' | 'accepted') {
+    // Build query: proposals JOIN services JOIN service_categories
+    let query = this.supabaseService.sb
+      .from('proposals')
+      .select(
+        `
+        id,
+        service_id,
+        technician_id,
+        price,
+        message,
+        status,
+        created_at,
+        available_date,
+        available_from,
+        available_to,
+        services:service_id (
+          id,
+          title,
+          description,
+          address,
+          status,
+          budget_min,
+          budget_max,
+          created_at,
+          service_categories:category_id (
+            id,
+            name
+          )
+        )
+      `,
+      )
+      .eq('technician_id', technicianId)
+      .order('created_at', { ascending: false });
+
+    // Apply optional status filter
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    const proposals = (data ?? []) as any[];
+
+    return proposals.map((p) => {
+      const service = p.services ?? {};
+      const category = service.service_categories ?? {};
+
+      // Compute a human-readable status_label for the proposal
+      const statusLabelMap: Record<string, string> = {
+        pending: 'Tu postulación está en revisión',
+        accepted: 'Propuesta aceptada',
+        rejected: 'Propuesta no seleccionada',
+      };
+
+      // Compute relative time from created_at
+      const createdAt = p.created_at ? new Date(p.created_at) : null;
+      let createdAtRelative = '';
+      if (createdAt) {
+        const diffMs = Date.now() - createdAt.getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+        if (diffMin < 60) {
+          createdAtRelative = `Hace ${diffMin} min`;
+        } else if (diffMin < 1440) {
+          createdAtRelative = `Hace ${Math.floor(diffMin / 60)} hora${Math.floor(diffMin / 60) > 1 ? 's' : ''}`;
+        } else {
+          createdAtRelative = `Hace ${Math.floor(diffMin / 1440)} día${Math.floor(diffMin / 1440) > 1 ? 's' : ''}`;
+        }
+      }
+
+      return {
+        // Proposal fields
+        id: p.id,
+        proposal_status: p.status,
+        status_label: statusLabelMap[p.status] ?? p.status,
+        price: Number(p.price),
+        message: p.message,
+        created_at_relative: createdAtRelative,
+        available_date: p.available_date ?? null,
+        available_from: p.available_from ?? null,
+        available_to: p.available_to ?? null,
+        // Mission/Service fields (flat, MissionModel-compatible)
+        service_id: p.service_id,
+        service_title: service.title ?? null,
+        description: service.description ?? null,
+        address: service.address ?? null,
+        status: service.status ?? null,
+        price_min: service.budget_min ?? null,
+        price_max: service.budget_max ?? null,
+        // Category
+        category_name: category.name ?? null,
+      };
+    });
   }
 }

@@ -33,13 +33,20 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const jwksUrl = `${supabaseUrl}/auth/v1/.well-known/jwks.json`;
-      const jwks = await (await fetch(jwksUrl)).json();
+      console.log('Fetching JWKS from:', jwksUrl);
+      const jwksResponse = await fetch(jwksUrl);
+      if (!jwksResponse.ok) {
+        console.error('Failed to fetch JWKS:', jwksResponse.statusText);
+      }
+      const jwks = await jwksResponse.json();
       const localJwks = createLocalJWKSet(jwks);
 
-      const { payload } = await jwtVerify(token, localJwks, {
-        issuer: `${supabaseUrl}/auth/v1`,
-        audience: 'authenticated',
-      });
+      // Decoding for debug
+      const { decodeJwt } = await import('jose');
+      const decoded = decodeJwt(token);
+      console.log('JWT Decoded Payload:', decoded);
+
+      const { payload } = await jwtVerify(token, localJwks);
 
       request.user = {
         sub: payload.sub as string,
@@ -47,8 +54,9 @@ export class JwtAuthGuard implements CanActivate {
       };
 
       return true;
-    } catch {
-      throw new UnauthorizedException('Token inválido');
+    } catch (err) {
+      console.error('JWT Verification Error:', err);
+      throw new UnauthorizedException(`Token inválido: ${err.message}`);
     }
   }
 }

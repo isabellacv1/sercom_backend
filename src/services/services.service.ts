@@ -12,7 +12,7 @@ import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-requ
 import { Database } from '../types/supabase';
 
 type ServiceUpdate = Database['public']['Tables']['services']['Update'];
-type ServiceStatus = Database['public']['Enums']['service_status'];
+export type ServiceStatus = Database['public']['Enums']['service_status'];
 
 @Injectable()
 export class ServicesService {
@@ -637,4 +637,70 @@ const filteredWorkers =
     candidates: filteredWorkers,
   };
 }
+
+  async findMissions(statusFilter: string, userId: string): Promise<any[]> {
+    let query = this.supabaseService.sb
+      .from('services')
+      .select(`
+        *,
+        category:service_categories(id, name, description, icon),
+        proposals:proposals(count)
+      `);
+
+    if (statusFilter === 'active') {
+      query = query.eq('status', 'requested');
+    } else if (statusFilter === 'in_progress') {
+      query = query
+        .or('status.eq.assigned,status.eq.on_the_way,status.eq.in_progress')
+        .eq('assigned_worker_id', userId);
+    } else if (statusFilter === 'history') {
+      query = query.eq('assigned_worker_id', userId).eq('status', 'completed');
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
+
+    return data.map((service: any) => {
+      const proposalsCount = service.proposals?.[0]?.count ?? 0;
+      return {
+        ...service,
+        price_min: service.budget_min,
+        price_max: service.budget_max,
+        category_name: service.category?.name || 'General',
+        proposals_count: proposalsCount,
+        offer_count: proposalsCount,
+        status_label: this.getStatusLabel(service.status),
+        created_at_relative: this.getRelativeTime(new Date(service.created_at)),
+      };
+    });
+  }
+
+  private getStatusLabel(status: ServiceStatus): string {
+    const labels: Record<ServiceStatus, string> = {
+      requested: 'Recibiendo postulaciones',
+      assigned: 'Asignada',
+      on_the_way: 'En camino',
+      in_progress: 'En ejecución',
+      completed: 'Completada',
+      cancelled: 'Cancelada',
+      draft: 'Borrador',
+    };
+    return labels[status] || status;
+  }
+
+  private getRelativeTime(date: Date): string {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return 'Hace un momento';
+    const mins = Math.floor(diffInSeconds / 60);
+    if (mins < 60) return `Hace ${mins} min`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `Hace ${hours} horas`;
+    const days = Math.floor(hours / 24);
+    return `Hace ${days} días`;
+  }
 }
