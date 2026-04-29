@@ -7,10 +7,16 @@ import {
   InternalServerErrorException,
   ConflictException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { LoginDto } from './dto/login.dto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { RegisterDto } from './dto/register.dto';
+
+type RegisterFiles = {
+  cedulaDocument?: Express.Multer.File | null;
+  workerPhoto?: Express.Multer.File | null;
+};
 
 @Injectable()
 export class AuthService {
@@ -53,7 +59,7 @@ export class AuthService {
     };
   }
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto, files?: RegisterFiles) {
     const email = dto.email.toLowerCase().trim();
     const role = dto.role ?? 'client';
 
@@ -66,6 +72,7 @@ export class AuthService {
       if (error.message.includes('User already registered')) {
         throw new ConflictException('El correo ya está registrado');
       }
+
       throw new InternalServerErrorException(error.message);
     }
 
@@ -73,14 +80,39 @@ export class AuthService {
       throw new InternalServerErrorException('No se pudo crear el usuario');
     }
 
+    let cedulaDocumentUrl: string | null = null;
+    let workerPhotoUrl: string | null = null;
+
+    if (role === 'worker') {
+      if (files?.cedulaDocument) {
+        cedulaDocumentUrl = await this.uploadWorkerFile(
+          data.user.id,
+          files.cedulaDocument,
+          'cedula',
+        );
+      }
+
+      if (files?.workerPhoto) {
+        workerPhotoUrl = await this.uploadWorkerFile(
+          data.user.id,
+          files.workerPhoto,
+          'foto',
+        );
+      }
+    }
+
     const profile = await this.profilesService.create(data.user.id, {
       fullName: dto.fullName,
       email,
       role,
-      cedula: dto.cedula,
+      cedula: role === 'worker' ? dto.cedula : undefined,
       phone: dto.phone,
-      address: dto.address,
-      specialty: dto.specialty,
+      address: role === 'worker' ? dto.address : undefined,
+      specialty: role === 'worker' ? dto.specialty : undefined,
+
+      // Estas dos propiedades deben existir en tu ProfilesService.
+      cedulaDocumentUrl,
+      workerPhotoUrl,
     });
 
     return {
@@ -98,7 +130,40 @@ export class AuthService {
         address: profile.address ?? null,
         city: profile.city ?? null,
         bio: profile.bio ?? null,
+        cedulaDocumentUrl,
+        workerPhotoUrl,
       },
     };
+  }
+
+  private async uploadWorkerFile(
+    userId: string,
+    file: Express.Multer.File,
+    type: 'cedula' | 'foto',
+  ): Promise<string> {
+    const bucketName = 'worker-documents';
+
+    const safeOriginalName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+
+    const filePath = `${userId}/${type}-${randomUUID()}-${safeOriginalName}`;
+
+    const { error } = await this.supabaseService.client.storage
+      .from(bucketName)
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype || 'application/octet-stream',
+        upsert: false,
+      });
+
+    if (error) {
+      throw new InternalServerErrorException(
+        `No se pudo subir el archivo ${type}: ${error.message}`,
+      );
+    }
+
+    const { data } = this.supabaseService.client.storage
+      .from(bucketName)
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
   }
 }

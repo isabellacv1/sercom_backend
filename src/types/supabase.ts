@@ -230,6 +230,8 @@ export type Database = {
           active_role: string | null
           address: string | null
           bio: string | null
+          cedula: string | null
+          cedula_document_url: string | null
           city: string | null
           created_at: string
           email: string
@@ -242,13 +244,17 @@ export type Database = {
           rating_avg: number | null
           rating_count: number | null
           roles: string[]
+          specialty: string | null
           status: Database["public"]["Enums"]["profile_status"]
           updated_at: string
+          worker_photo_url: string | null
         }
         Insert: {
           active_role?: string | null
           address?: string | null
           bio?: string | null
+          cedula?: string | null
+          cedula_document_url?: string | null
           city?: string | null
           created_at?: string
           email: string
@@ -261,13 +267,17 @@ export type Database = {
           rating_avg?: number | null
           rating_count?: number | null
           roles?: string[]
+          specialty?: string | null
           status?: Database["public"]["Enums"]["profile_status"]
           updated_at?: string
+          worker_photo_url?: string | null
         }
         Update: {
           active_role?: string | null
           address?: string | null
           bio?: string | null
+          cedula?: string | null
+          cedula_document_url?: string | null
           city?: string | null
           created_at?: string
           email?: string
@@ -280,8 +290,10 @@ export type Database = {
           rating_avg?: number | null
           rating_count?: number | null
           roles?: string[]
+          specialty?: string | null
           status?: Database["public"]["Enums"]["profile_status"]
           updated_at?: string
+          worker_photo_url?: string | null
         }
         Relationships: []
       }

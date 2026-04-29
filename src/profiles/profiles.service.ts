@@ -12,6 +12,18 @@ type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
 type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
 type ProfileStatus = Database['public']['Enums']['profile_status'];
 
+type CreateProfileDto = {
+  fullName: string;
+  email: string;
+  role?: 'client' | 'worker';
+  cedula?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  specialty?: string | null;
+  cedulaDocumentUrl?: string | null;
+  workerPhotoUrl?: string | null;
+};
+
 @Injectable()
 export class ProfilesService {
   constructor(private readonly supabaseService: SupabaseService) {}
@@ -23,9 +35,7 @@ export class ProfilesService {
       .order('created_at', { ascending: false });
 
     if (error) {
-      throw new InternalServerErrorException(
-        'Error al obtener los perfiles',
-      );
+      throw new InternalServerErrorException('Error al obtener los perfiles');
     }
 
     return data;
@@ -63,41 +73,38 @@ export class ProfilesService {
     return data;
   }
 
-  async create(
-    userId: string,
-    dto: {
-      fullName: string;
-      email: string;
-      role?: 'client' | 'worker';
-      cedula?: string;
-      phone?: string;
-      address?: string;
-      specialty?: string;
-    },
-  ) {
+  async create(userId: string, dto: CreateProfileDto) {
     const role = dto.role ?? 'client';
 
-    const profileToInsert: any = {
+    const profileToInsert: ProfileInsert = {
       id: userId,
       full_name: dto.fullName,
       email: dto.email,
       roles: [role],
       active_role: role,
-      status: 'pending_verification',
+
+      // Como pediste que no haya validación, queda activo.
+      // Si tu enum no tiene 'active', cambia esto por 'pending_verification'.
+      status: 'verified' as ProfileStatus,
+
+      phone: dto.phone ?? null,
     };
 
     if (role === 'worker') {
       profileToInsert.cedula = dto.cedula ?? null;
-      profileToInsert.phone = dto.phone ?? null;
       profileToInsert.address = dto.address ?? null;
       profileToInsert.specialty = dto.specialty ?? null;
       profileToInsert.bio = dto.specialty ?? null;
+
+      profileToInsert.cedula_document_url = dto.cedulaDocumentUrl ?? null;
+
+      profileToInsert.worker_photo_url = dto.workerPhotoUrl ?? null;
     }
 
     const { data, error } = await this.supabaseService.client
       .from('profiles')
       .insert(profileToInsert)
-      .select()
+      .select('*')
       .single();
 
     if (error) {
