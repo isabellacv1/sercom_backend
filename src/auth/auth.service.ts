@@ -11,7 +11,7 @@ import { LoginDto } from './dto/login.dto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { RegisterDto } from './dto/register.dto';
-
+type UserRole = 'client' | 'worker';
 @Injectable()
 export class AuthService {
   constructor(
@@ -51,6 +51,36 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     const email = dto.email.toLowerCase().trim();
+<<<<<<< HEAD
+    const role = dto.role ?? 'client';
+
+    const { data, error } = await this.supabaseService.client.auth.signUp({
+      email,
+      password: dto.password,
+    });
+
+    if (error) {
+      if (error.message.includes('User already registered')) {
+        throw new ConflictException('El correo ya está registrado');
+      }
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (!data.user) {
+      throw new InternalServerErrorException('No se pudo crear el usuario');
+    }
+
+    const profile = await this.profilesService.create(data.user.id, {
+      fullName: dto.fullName,
+      email,
+      role,
+      cedula: dto.cedula,
+      phone: dto.phone,
+      address: dto.address,
+      specialty: dto.specialty,
+    });
+
+=======
 
     console.log('DTO REGISTER:', dto);
 
@@ -85,6 +115,7 @@ export class AuthService {
       throw err;
     }
 
+>>>>>>> 81475b33948c9e84fc9a13a15050088fedf3e65e
     return {
       message: data.session
         ? 'Registro exitoso'
@@ -93,9 +124,15 @@ export class AuthService {
         id: data.user.id,
         email,
         fullName: dto.fullName,
+<<<<<<< HEAD
+        roles: profile.roles,
+        activeRole: profile.active_role,
+        status: profile.status,
+=======
         roles: ['client'],
         activeRole: 'client',
         status: 'pending_verification',
+>>>>>>> 81475b33948c9e84fc9a13a15050088fedf3e65e
       },
     };
   }

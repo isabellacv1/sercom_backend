@@ -68,27 +68,35 @@ export class ProfilesService {
     dto: {
       fullName: string;
       email: string;
+      role?: 'client' | 'worker';
+      cedula?: string;
+      phone?: string;
+      address?: string;
+      specialty?: string;
     },
   ) {
-    const existingProfile = await this.findByUserId(userId);
+    const role = dto.role ?? 'client';
 
-    if (existingProfile) {
-      console.log('El perfil ya existe, se retorna el existente');
-      return existingProfile;
-    }
-
-    const payload: ProfileInsert = {
+    const profileToInsert: any = {
       id: userId,
       full_name: dto.fullName,
       email: dto.email,
-      roles: [AppRoles.CLIENT],
-      active_role: AppRoles.CLIENT,
+      roles: [role],
+      active_role: role,
       status: 'pending_verification',
     };
 
+    if (role === 'worker') {
+      profileToInsert.cedula = dto.cedula ?? null;
+      profileToInsert.phone = dto.phone ?? null;
+      profileToInsert.address = dto.address ?? null;
+      profileToInsert.specialty = dto.specialty ?? null;
+      profileToInsert.bio = dto.specialty ?? null;
+    }
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
-      .insert(payload)
+      .insert(profileToInsert)
       .select()
       .single();
 
