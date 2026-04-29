@@ -15,7 +15,7 @@ import { Database } from '../types/supabase';
 type ServiceUpdate = Database['public']['Tables']['services']['Update'];
 export type ServiceStatus = Database['public']['Enums']['service_status'];
 
-type CandidateWorkerProfile = Pick<
+/*type CandidateWorkerProfile = Pick<
   Database['public']['Tables']['profiles']['Row'],
   | 'id'
   | 'full_name'
@@ -66,7 +66,7 @@ function isWorkerSkillCandidateJoin(
     typeof p.status === 'string' &&
     typeof p.role === 'string'
   );
-}
+}*/
 
 @Injectable()
 export class ServicesService {
@@ -680,19 +680,6 @@ const filteredWorkers =
       );
     }
 
-    const workersRaw: unknown = workersResponse.data;
-    const workersList: unknown[] = Array.isArray(workersRaw) ? workersRaw : [];
-
-    const filteredWorkers = workersList.filter(
-      (item): item is WorkerSkillCandidateJoin => {
-        if (!isWorkerSkillCandidateJoin(item)) {
-          return false;
-        }
-        const { worker } = item;
-
-        if (worker.role !== 'worker') return false;
-        if (!worker.is_active) return false;
-        if (worker.status !== 'verified') return false;
     return true;
   }) ?? [];
 
@@ -705,7 +692,7 @@ const filteredWorkers =
   };
 }
 
-  async findMissions(statusFilter: string, userId: string): Promise<any[]> {
+ async findMissions(statusFilter: string, userId: string): Promise<any[]> {
     let query = this.supabaseService.sb
       .from('services')
       .select(`
@@ -730,9 +717,6 @@ const filteredWorkers =
       throw new InternalServerErrorException(error.message);
     }
 
-        return true;
-      },
-    );
     return data.map((service: any) => {
       const proposalsCount = service.proposals?.[0]?.count ?? 0;
       return {

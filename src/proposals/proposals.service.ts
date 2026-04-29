@@ -393,6 +393,9 @@ export class ProposalsService {
 
     const data = updateResponse.data;
     const error = updateResponse.error;
+  }
+
+
   async findMineForWorker(technicianId: string, status?: 'pending' | 'accepted') {
     // Build query: proposals JOIN services JOIN service_categories
     let query = this.supabaseService.sb
@@ -439,10 +442,6 @@ export class ProposalsService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return {
-      message: 'Propuesta actualizada',
-      proposal: data,
-    };
     const proposals = (data ?? []) as any[];
 
     return proposals.map((p) => {
