@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AppRoles } from '../auth/interfaces/app-roles';
 import { AddPortfolioItemDto } from './dto/add-portfolio-item.dto';
-import { SetCoverageZonesDto, UpdateWorkerProfileDto } from './dto/update-worker-profile.dto';
+import { SetCoverageZonesDto, SetWorkerSkillsDto, UpdateWorkerProfileDto } from './dto/update-worker-profile.dto';
 import { WorkerProfileService } from './worker-profile.service';
 import type { JwtUser } from '../auth/decorators/current-user.decorator';
  
@@ -42,6 +43,18 @@ export class WorkerProfileController {
   setCoverageZones(@CurrentUser() user: JwtUser, @Body() dto: SetCoverageZonesDto) {
     return this.workerProfileService.setCoverageZones(user.sub, dto);
   }
+
+  @Auth(AppRoles.WORKER)
+  @Get('me/skills')
+  getSkills(@CurrentUser() user: JwtUser) {
+    return this.workerProfileService.getSkills(user.sub);
+  }
+
+  @Auth(AppRoles.WORKER)
+  @Patch('me/skills')
+  setWorkerSkills(@CurrentUser() user: JwtUser, @Body() dto: SetWorkerSkillsDto) {
+    return this.workerProfileService.setWorkerSkills(user.sub, dto);
+  }
  
   // GET /worker-profile/me/portfolio
   // Ver items del portafolio
@@ -57,6 +70,21 @@ export class WorkerProfileController {
   @Post('me/portfolio')
   addPortfolioItem(@CurrentUser() user: JwtUser, @Body() dto: AddPortfolioItemDto) {
     return this.workerProfileService.addPortfolioItem(user.sub, dto);
+  }
+
+  @Auth(AppRoles.WORKER)
+  @Post('me/portfolio/upload')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadPortfolioFile(
+    @CurrentUser() user: JwtUser,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('title') title?: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Debes cargar un archivo de portafolio');
+    }
+
+    return this.workerProfileService.uploadPortfolioFile(user.sub, file, title);
   }
  
   // DELETE /worker-profile/me/portfolio/:itemId
@@ -86,4 +114,3 @@ export class WorkerProfileController {
     return this.workerProfileService.unpublishProfile(user.sub);
   }
 }
- 
