@@ -16,4 +16,7 @@ export class MissionResponseDto {
   status_label: string;
   created_at: string;
   created_at_relative: string;
+  worker_confirmation?: boolean;
+  client_confirmation?: boolean;
+  escrow_ui_message?: string;
 }

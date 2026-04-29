@@ -57,6 +57,15 @@ export class ServicesController {
     return this.servicesService.findStatusHistory(user.sub, id);
   }
 
+  @Patch(':id/confirm')
+  confirmCompletion(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.servicesService.confirmCompletion(user.sub, id);
+  }
+
+
   @Post()
   create(
     @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
