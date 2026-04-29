@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
@@ -33,8 +33,11 @@ export class ChatController {
   }
 
     @Get('users/:userId/rooms')
-    getUserRooms(@Param('userId') userId: string) {
-        return this.chatService.getUserRooms(userId);
+    getUserRooms(
+      @Param('userId') userId: string,
+      @Query('role') role?: 'client' | 'worker' | 'all',
+    ) {
+      return this.chatService.getUserRooms(userId, role ?? 'all');
     }
 
 
