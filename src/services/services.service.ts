@@ -15,59 +15,6 @@ import { Database } from '../types/supabase';
 type ServiceUpdate = Database['public']['Tables']['services']['Update'];
 export type ServiceStatus = Database['public']['Enums']['service_status'];
 
-/*type CandidateWorkerProfile = Pick<
-  Database['public']['Tables']['profiles']['Row'],
-  | 'id'
-  | 'full_name'
-  | 'email'
-  | 'city'
-  | 'rating_avg'
-  | 'rating_count'
-  | 'profile_image_url'
-  | 'is_active'
-  | 'status'
-  | 'role'
->;
-
-type WorkerSkillCandidateJoin = Pick<
-  Database['public']['Tables']['worker_skills']['Row'],
-  'id' | 'years_experience' | 'base_price' | 'is_active'
-> & {
-  worker: CandidateWorkerProfile;
-  category: Pick<
-    Database['public']['Tables']['service_categories']['Row'],
-    'id' | 'name'
-  > | null;
-};
-
-function isWorkerSkillCandidateJoin(
-  value: unknown,
-): value is WorkerSkillCandidateJoin {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  if (!('worker' in value)) {
-    return false;
-  }
-  const workerUnknown = (value as { worker: unknown }).worker;
-  if (typeof workerUnknown !== 'object' || workerUnknown === null) {
-    return false;
-  }
-  const p = workerUnknown as Record<string, unknown>;
-  return (
-    typeof p.id === 'string' &&
-    typeof p.full_name === 'string' &&
-    typeof p.email === 'string' &&
-    (p.city === null || typeof p.city === 'string') &&
-    (p.rating_avg === null || typeof p.rating_avg === 'number') &&
-    (p.rating_count === null || typeof p.rating_count === 'number') &&
-    (p.profile_image_url === null || typeof p.profile_image_url === 'string') &&
-    typeof p.is_active === 'boolean' &&
-    typeof p.status === 'string' &&
-    typeof p.role === 'string'
-  );
-}*/
-
 @Injectable()
 export class ServicesService {
   constructor(private readonly supabaseService: SupabaseService) {}
@@ -216,6 +163,12 @@ export class ServicesService {
       throw new InternalServerErrorException(updateError.message);
     }
 
+    if (!updatedService) {
+      throw new InternalServerErrorException(
+        'No se pudo actualizar la pre-solicitud',
+      );
+    }
+
     const historyResponse = await this.supabaseService.sb
       .from('service_status_history')
       .insert({
@@ -284,7 +237,7 @@ export class ServicesService {
       throw new InternalServerErrorException(historyError.message);
     }
 
-    return history;
+    return history ?? [];
   }
 
   async updateStatus(
@@ -339,7 +292,13 @@ export class ServicesService {
       .from('services')
       .update(updatePayload)
       .eq('id', serviceId)
-      .select()
+      .select(
+        `
+        *,
+        category:service_categories(id, name, description, icon),
+        service_option:service_options(id, category_id, title, description, specialist_level)
+      `,
+      )
       .single();
 
     const updatedService = updateResponse.data;
@@ -349,11 +308,35 @@ export class ServicesService {
       throw new InternalServerErrorException(updateError.message);
     }
 
-    return updatedService;
+    if (!updatedService) {
+      throw new InternalServerErrorException(
+        'No se pudo actualizar el estado del servicio',
+      );
+    }
+
+    const historyResponse = await this.supabaseService.sb
+      .from('service_status_history')
+      .insert({
+        service_id: serviceId,
+        status: nextStatus,
+        changed_by: workerId,
+        note: `Estado actualizado a ${this.getStatusLabel(nextStatus)}`,
+      });
+
+    const historyError = historyResponse.error;
+
+    if (historyError) {
+      throw new InternalServerErrorException(historyError.message);
+    }
+
+    return {
+      ...updatedService,
+      status_label: this.getStatusLabel(updatedService.status),
+      escrow_ui_message: this.getEscrowUiMessage(updatedService),
+    };
   }
 
   async confirmCompletion(userId: string, serviceId: string) {
-    // 1. Obtener el servicio
     const serviceResponse = await this.supabaseService.sb
       .from('services')
       .select('*')
@@ -371,23 +354,19 @@ export class ServicesService {
       throw new NotFoundException('Servicio no encontrado');
     }
 
-    // 2. Validar que el servicio no esté ya cancelado o completado
     if (service.status === 'cancelled' || service.status === 'completed') {
       throw new BadRequestException(
         'No se puede confirmar un servicio cancelado o que ya está finalizado',
       );
     }
 
-    // 3. Determinar rol y preparar actualización
-    let updatePayload: any = {};
+    let updatePayload: ServiceUpdate = {};
     let isClient = false;
-    let isWorker = false;
 
     if (service.client_id === userId) {
       isClient = true;
       updatePayload = { client_confirmation: true };
     } else if (service.assigned_worker_id === userId) {
-      isWorker = true;
       updatePayload = { worker_confirmation: true };
     } else {
       throw new ForbiddenException(
@@ -395,8 +374,6 @@ export class ServicesService {
       );
     }
 
-    // 4. Actualizar en Supabase. El trigger se encarga de cambiar el status a 'completed'
-    // si ambas confirmaciones son true y liberar el pago.
     const updateResponse = await this.supabaseService.sb
       .from('services')
       .update(updatePayload)
@@ -411,9 +388,21 @@ export class ServicesService {
       throw new InternalServerErrorException(updateError.message);
     }
 
+    if (!updatedService) {
+      throw new InternalServerErrorException(
+        'No se pudo registrar la confirmación del servicio',
+      );
+    }
+
     return {
-      message: `Confirmación de ${isClient ? 'cliente' : 'trabajador'} registrada exitosamente.`,
-      service: updatedService,
+      message: `Confirmación de ${
+        isClient ? 'cliente' : 'trabajador'
+      } registrada exitosamente.`,
+      service: {
+        ...updatedService,
+        status_label: this.getStatusLabel(updatedService.status),
+        escrow_ui_message: this.getEscrowUiMessage(updatedService),
+      },
     };
   }
 
@@ -496,6 +485,12 @@ export class ServicesService {
       throw new InternalServerErrorException(updateError.message);
     }
 
+    if (!updatedService) {
+      throw new InternalServerErrorException(
+        'No se pudo asignar el trabajador al servicio',
+      );
+    }
+
     const historyResponse = await this.supabaseService.sb
       .from('service_status_history')
       .insert({
@@ -511,7 +506,11 @@ export class ServicesService {
       throw new InternalServerErrorException(historyError.message);
     }
 
-    return updatedService;
+    return {
+      ...updatedService,
+      status_label: this.getStatusLabel(updatedService.status),
+      escrow_ui_message: this.getEscrowUiMessage(updatedService),
+    };
   }
 
   async create(clientId: string, dto: CreateServiceDto) {
@@ -583,11 +582,13 @@ export class ServicesService {
         scheduled_at: dto.scheduled_at ?? null,
         status: 'requested',
       })
-      .select(`
+      .select(
+        `
         *,
         category:service_categories(id, name, description, icon),
         service_option:service_options(id, category_id, title, description, specialist_level)
-      `)
+      `,
+      )
       .single();
 
     const data = createResponse.data;
@@ -622,7 +623,11 @@ export class ServicesService {
 
     return {
       message: 'Solicitud de servicio creada exitosamente',
-      service: data,
+      service: {
+        ...data,
+        status_label: this.getStatusLabel(data.status),
+        escrow_ui_message: this.getEscrowUiMessage(data),
+      },
       candidate_workers: candidateWorkers.candidates,
       total_candidates: candidateWorkers.candidates.length,
     };
@@ -631,11 +636,13 @@ export class ServicesService {
   async findMine(clientId: string) {
     const response = await this.supabaseService.sb
       .from('services')
-      .select(`
+      .select(
+        `
         *,
         category:service_categories(id, name, description, icon),
         service_option:service_options(id, category_id, title, description, specialist_level)
-      `)
+      `,
+      )
       .eq('client_id', clientId)
       .order('created_at', { ascending: false });
 
@@ -646,8 +653,9 @@ export class ServicesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data || []).map((service: any) => ({
+    return (data ?? []).map((service: any) => ({
       ...service,
+      status_label: this.getStatusLabel(service.status),
       escrow_ui_message: this.getEscrowUiMessage(service),
     }));
   }
@@ -655,11 +663,13 @@ export class ServicesService {
   async findOneMine(clientId: string, serviceId: string) {
     const response = await this.supabaseService.sb
       .from('services')
-      .select(`
+      .select(
+        `
         *,
         category:service_categories(id, name, description, icon),
         service_option:service_options(id, category_id, title, description, specialist_level)
-      `)
+      `,
+      )
       .eq('id', serviceId)
       .eq('client_id', clientId)
       .maybeSingle();
@@ -677,100 +687,101 @@ export class ServicesService {
 
     return {
       ...data,
+      status_label: this.getStatusLabel(data.status),
       escrow_ui_message: this.getEscrowUiMessage(data),
     };
   }
 
- async findCandidateWorkers(clientId: string, serviceId: string) {
-  const serviceResponse = await this.supabaseService.sb
-    .from('services')
-    .select('*')
-    .eq('id', serviceId)
-    .eq('client_id', clientId)
-    .maybeSingle();
+  async findCandidateWorkers(clientId: string, serviceId: string) {
+    const serviceResponse = await this.supabaseService.sb
+      .from('services')
+      .select('*')
+      .eq('id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
 
-  const service = serviceResponse.data;
-  const serviceError = serviceResponse.error;
+    const service = serviceResponse.data;
+    const serviceError = serviceResponse.error;
 
-  if (serviceError) {
-    throw new InternalServerErrorException(serviceError.message);
-  }
-
-  if (!service) {
-    throw new NotFoundException('Servicio no encontrado');
-  }
-
-  const workersResponse = await this.supabaseService.sb
-    .from('worker_skills')
-    .select(`
-      id,
-      years_experience,
-      base_price,
-      is_active,
-      worker:profiles!worker_skills_worker_id_fkey(
-        id,
-        full_name,
-        email,
-        city,
-        rating_avg,
-        rating_count,
-        profile_image_url,
-        is_active,
-        status,
-        active_role,
-        roles
-      ),
-      category:service_categories(
-        id,
-        name
-      )
-    `)
-    .eq('category_id', service.category_id)
-    .eq('is_active', true);
-
-  const workers = workersResponse.data;
-  const workersError = workersResponse.error;
-
-  if (workersError) {
-    throw new InternalServerErrorException(workersError.message);
-  }
-
-const filteredWorkers =
-  workers?.filter((item: any) => {
-    const worker = item.worker;
-
-    if (!worker) return false;
-    if (worker.active_role !== 'worker') return false;
-    if (!worker.is_active) return false;
-    if (worker.status !== 'verified') return false;
-
-    if (service.city && worker.city) {
-      return (
-        worker.city.trim().toLowerCase() ===
-        service.city.trim().toLowerCase()
-      );
+    if (serviceError) {
+      throw new InternalServerErrorException(serviceError.message);
     }
 
-    return true;
-  }) ?? [];
+    if (!service) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
 
-  return {
-    service_id: service.id,
-    category_id: service.category_id,
-    service_option_id: service.service_option_id,
-    city: service.city,
-    candidates: filteredWorkers,
-  };
-}
+    const workersResponse = await this.supabaseService.sb
+      .from('worker_skills')
+      .select(
+        `
+        id,
+        years_experience,
+        base_price,
+        is_active,
+        worker:profiles!worker_skills_worker_id_fkey(
+          id,
+          full_name,
+          email,
+          city,
+          rating_avg,
+          rating_count,
+          profile_image_url,
+          is_active,
+          status,
+          active_role,
+          roles
+        ),
+        category:service_categories(
+          id,
+          name
+        )
+      `,
+      )
+      .eq('category_id', service.category_id)
+      .eq('is_active', true);
 
- async findMissions(statusFilter: string, userId: string): Promise<any[]> {
-    let query = this.supabaseService.sb
-      .from('services')
-      .select(`
-        *,
-        category:service_categories(id, name, description, icon),
-        proposals:proposals(count)
-      `);
+    const workers = workersResponse.data;
+    const workersError = workersResponse.error;
+
+    if (workersError) {
+      throw new InternalServerErrorException(workersError.message);
+    }
+
+    const filteredWorkers =
+      workers?.filter((item: any) => {
+        const worker = item.worker;
+
+        if (!worker) return false;
+        if (worker.active_role !== 'worker') return false;
+        if (!worker.is_active) return false;
+        if (worker.status !== 'verified') return false;
+
+        if (service.city && worker.city) {
+          return (
+            worker.city.trim().toLowerCase() ===
+            service.city.trim().toLowerCase()
+          );
+        }
+
+        return true;
+      }) ?? [];
+
+    return {
+      service_id: service.id,
+      category_id: service.category_id,
+      service_option_id: service.service_option_id,
+      city: service.city,
+      candidates: filteredWorkers,
+    };
+  }
+
+  async findMissions(statusFilter: string, userId: string): Promise<any[]> {
+    let query = this.supabaseService.sb.from('services').select(`
+      *,
+      category:service_categories(id, name, description, icon),
+      proposals:proposals(count)
+    `);
 
     if (statusFilter === 'active') {
       query = query.eq('status', 'requested');
@@ -782,14 +793,17 @@ const filteredWorkers =
       query = query.eq('assigned_worker_id', userId).eq('status', 'completed');
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data, error } = await query.order('created_at', {
+      ascending: false,
+    });
 
     if (error) {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data.map((service: any) => {
+    return (data ?? []).map((service: any) => {
       const proposalsCount = service.proposals?.[0]?.count ?? 0;
+
       return {
         ...service,
         price_min: service.budget_min,
@@ -810,29 +824,44 @@ const filteredWorkers =
     if (service.status === 'completed') {
       return 'Servicio finalizado y fondos liberados';
     }
-    if (service.worker_confirmation === true && service.client_confirmation === false) {
+
+    if (
+      service.worker_confirmation === true &&
+      service.client_confirmation === false
+    ) {
       return 'Esperando que confirmes para liberar el pago';
     }
-    if (service.worker_confirmation === false && service.client_confirmation === true) {
+
+    if (
+      service.worker_confirmation === false &&
+      service.client_confirmation === true
+    ) {
       return 'Esperando que el trabajador confirme la finalización';
     }
-    if (service.worker_confirmation === false && service.client_confirmation === false && service.status === 'in_progress') {
+
+    if (
+      service.worker_confirmation === false &&
+      service.client_confirmation === false &&
+      service.status === 'in_progress'
+    ) {
       return 'Servicio en ejecución';
     }
+
     return 'Estado pendiente';
   }
 
   private getStatusLabel(serviceStatus: ServiceStatus): string {
     const labels: Record<ServiceStatus, string> = {
-      requested: 'Recibiendo postulaciones',
-      assigned: 'Asignada',
+      draft: 'Borrador',
+      requested: 'Solicitado',
+      assigned: 'Asignado',
       on_the_way: 'En camino',
       in_progress: 'En ejecución',
-      completed: 'Completada',
-      cancelled: 'Cancelada',
-      draft: 'Borrador',
+      completed: 'Finalizado',
+      cancelled: 'Cancelado',
     };
-    return labels[status] || status;
+
+    return labels[serviceStatus] || serviceStatus;
   }
 
   private getRelativeTime(date: Date): string {
@@ -840,18 +869,17 @@ const filteredWorkers =
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
     if (diffInSeconds < 60) return 'Hace un momento';
+
     const mins = Math.floor(diffInSeconds / 60);
     if (mins < 60) return `Hace ${mins} min`;
+
     const hours = Math.floor(mins / 60);
     if (hours < 24) return `Hace ${hours} horas`;
+
     const days = Math.floor(hours / 24);
     return `Hace ${days} días`;
   }
 
-  /**
-   * Trabajos publicados (requested) sin técnico asignado, para que un trabajador explore y postule.
-   * No incluye solicitudes creadas por el propio usuario.
-   */
   async findOpportunities(userId: string, query: FindOpportunitiesQueryDto) {
     this.assertOpportunitiesGeoParams(query);
 
@@ -860,10 +888,10 @@ const filteredWorkers =
     const offset = (page - 1) * limit;
 
     const fullSelect = `
-        *,
-        category:service_categories(id, name, description, icon),
-        service_option:service_options(id, category_id, title, description, specialist_level)
-      `;
+      *,
+      category:service_categories(id, name, description, icon),
+      service_option:service_options(id, category_id, title, description, specialist_level)
+    `;
 
     const hasGeo =
       query.latitude != null &&
@@ -967,6 +995,7 @@ const filteredWorkers =
     }
 
     const orderMap = new Map(ids.map((id, idx) => [id, idx]));
+
     const sortedFull = (fullRows ?? []).slice().sort((a, b) => {
       const idA = String((a as { id: string }).id);
       const idB = String((b as { id: string }).id);
@@ -975,6 +1004,7 @@ const filteredWorkers =
 
     const data = sortedFull.map((row) => {
       const meta = pageSlice.find((p) => p.id === row.id);
+
       return {
         ...row,
         distance_km:
@@ -1002,6 +1032,7 @@ const filteredWorkers =
       query.latitude != null ||
       query.longitude != null ||
       query.radiusKm != null;
+
     const hasAll =
       query.latitude != null &&
       query.longitude != null &&
@@ -1035,11 +1066,16 @@ const filteredWorkers =
   ): number {
     const R = 6371;
     const toRad = (d: number) => (d * Math.PI) / 180;
+
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
+
     const a =
       Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+      Math.cos(toRad(lat1)) *
+        Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) ** 2;
+
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 }

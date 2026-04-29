@@ -15,7 +15,6 @@ export class ProposalsService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
   async create(technicianId: string, dto: CreateProposalDto) {
-    // 1. Validate service exists and status
     const serviceResponse = await this.supabaseService.sb
       .from('services')
       .select('id, status')
@@ -31,11 +30,13 @@ export class ProposalsService {
     }
 
     const { status } = serviceResponse.data;
+
     if (status !== 'requested') {
-      throw new BadRequestException('El servicio no está recibiendo postulaciones');
+      throw new BadRequestException(
+        'El servicio no está recibiendo postulaciones',
+      );
     }
 
-    // 2. Check for duplicate proposals by this technician for this service
     const existingProposalResponse = await this.supabaseService.sb
       .from('proposals')
       .select('id')
@@ -44,14 +45,17 @@ export class ProposalsService {
       .maybeSingle();
 
     if (existingProposalResponse.error) {
-      throw new InternalServerErrorException(existingProposalResponse.error.message);
+      throw new InternalServerErrorException(
+        existingProposalResponse.error.message,
+      );
     }
 
     if (existingProposalResponse.data) {
-      throw new ConflictException('Ya has enviado una propuesta para este servicio');
+      throw new ConflictException(
+        'Ya has enviado una propuesta para este servicio',
+      );
     }
 
-    // 3. Insert the proposal
     const proposalToInsert: any = {
       service_id: dto.service_id,
       technician_id: technicianId,
@@ -69,18 +73,15 @@ export class ProposalsService {
       .select()
       .single();
 
-    const data = response.data;
-    const error = response.error;
-
-    if (error) {
-      throw new InternalServerErrorException(error.message);
+    if (response.error) {
+      throw new InternalServerErrorException(response.error.message);
     }
 
-    if (!data) {
+    if (!response.data) {
       throw new InternalServerErrorException('Error al crear la propuesta');
     }
 
-    const insertedProposal = data as any;
+    const insertedProposal = response.data as any;
 
     return {
       message: 'Propuesta creada exitosamente',
@@ -99,6 +100,7 @@ export class ProposalsService {
       },
     };
   }
+
   async findByServiceForClient(serviceId: string, clientId: string) {
     const serviceResponse = await this.supabaseService.sb
       .from('services')
@@ -152,10 +154,12 @@ export class ProposalsService {
       throw new InternalServerErrorException(proposalsResponse.error.message);
     }
 
+    const proposals = proposalsResponse.data ?? [];
+
     return {
       message: 'Propuestas obtenidas exitosamente',
-      total: proposalsResponse.data.length,
-      proposals: proposalsResponse.data.map((proposal: any) => ({
+      total: proposals.length,
+      proposals: proposals.map((proposal: any) => ({
         id: proposal.id,
         serviceId: proposal.service_id,
         technicianId: proposal.technician_id,
@@ -177,8 +181,8 @@ export class ProposalsService {
       })),
     };
   }
+
   async acceptProposal(proposalId: string, clientId: string) {
-    // 1. Traer la propuesta
     const proposalResponse = await this.supabaseService.sb
       .from('proposals')
       .select(
@@ -189,7 +193,8 @@ export class ProposalsService {
         price,
         available_date,
         available_from,
-        available_to
+        available_to,
+        status
       `,
       )
       .eq('id', proposalId)
@@ -205,10 +210,13 @@ export class ProposalsService {
 
     const proposal = proposalResponse.data as any;
 
-    // 2. Validar servicio y ownership
+    if (proposal.status !== 'pending') {
+      throw new ConflictException('Esta propuesta ya fue procesada');
+    }
+
     const serviceResponse = await this.supabaseService.sb
       .from('services')
-      .select('id, client_id, status')
+      .select('id, client_id, status, assigned_worker_id')
       .eq('id', proposal.service_id)
       .maybeSingle();
 
@@ -220,15 +228,24 @@ export class ProposalsService {
       throw new NotFoundException('El servicio no existe');
     }
 
-    if (serviceResponse.data.client_id !== clientId) {
+    const service = serviceResponse.data as any;
+
+    if (service.client_id !== clientId) {
       throw new ForbiddenException('No puedes aceptar esta propuesta');
     }
 
-    if (serviceResponse.data.status !== 'requested') {
-      throw new ConflictException('Este servicio ya no recibe propuestas o ya fue asignado');
+    if (service.status !== 'requested') {
+      throw new ConflictException(
+        'Este servicio ya no recibe propuestas o ya fue asignado',
+      );
     }
 
-    // 3. Verificar si ya existe asignación
+    if (service.assigned_worker_id) {
+      throw new ConflictException(
+        'Este servicio ya tiene un trabajador asignado',
+      );
+    }
+
     const existingAssignment = await this.supabaseService.sb
       .from('service_assignments')
       .select('id')
@@ -240,10 +257,11 @@ export class ProposalsService {
     }
 
     if (existingAssignment.data) {
-      throw new ConflictException('Este servicio ya tiene un trabajador asignado');
+      throw new ConflictException(
+        'Este servicio ya tiene un trabajador asignado',
+      );
     }
 
-    // 4. Crear asignación
     const assignmentResponse = await this.supabaseService.sb
       .from('service_assignments')
       .insert([
@@ -266,6 +284,12 @@ export class ProposalsService {
       throw new InternalServerErrorException(assignmentResponse.error.message);
     }
 
+    if (!assignmentResponse.data) {
+      throw new InternalServerErrorException(
+        'No se pudo crear la asignación del servicio',
+      );
+    }
+
     const chatRoomResponse = await this.supabaseService.sb
       .from('chat_rooms')
       .upsert(
@@ -283,29 +307,54 @@ export class ProposalsService {
       throw new InternalServerErrorException(chatRoomResponse.error.message);
     }
 
-    // 5. Actualizar propuesta aceptada
-    await this.supabaseService.sb
+    const acceptProposalResponse = await this.supabaseService.sb
       .from('proposals')
       .update({ status: 'accepted' })
       .eq('id', proposalId);
 
-    // 6. Rechazar las demás (opcional pero MUY recomendado)
-    await this.supabaseService.sb
+    if (acceptProposalResponse.error) {
+      throw new InternalServerErrorException(
+        acceptProposalResponse.error.message,
+      );
+    }
+
+    const rejectProposalsResponse = await this.supabaseService.sb
       .from('proposals')
       .update({ status: 'rejected' })
       .eq('service_id', proposal.service_id)
       .neq('id', proposalId);
 
-    // 7. Actualizar servicio
-    await this.supabaseService.sb
+    if (rejectProposalsResponse.error) {
+      throw new InternalServerErrorException(
+        rejectProposalsResponse.error.message,
+      );
+    }
+
+    const updateServiceResponse = await this.supabaseService.sb
       .from('services')
-      .update({ status: 'assigned' })
-      .eq('id', proposal.service_id);
+      .update({
+        status: 'assigned',
+        assigned_worker_id: proposal.technician_id,
+      })
+      .eq('id', proposal.service_id)
+      .select()
+      .single();
+
+    if (updateServiceResponse.error) {
+      throw new InternalServerErrorException(updateServiceResponse.error.message);
+    }
+
+    if (!updateServiceResponse.data) {
+      throw new InternalServerErrorException(
+        'No se pudo asignar el trabajador al servicio',
+      );
+    }
 
     return {
       message: 'Propuesta aceptada y trabajador asignado',
       assignment: assignmentResponse.data,
       chatRoom: chatRoomResponse.data,
+      service: updateServiceResponse.data,
     };
   }
 
@@ -316,7 +365,7 @@ export class ProposalsService {
       dto.estimated_duration === undefined
     ) {
       throw new BadRequestException(
-        'Debes enviar al menos un campo a actualizar (price, message o estimated_duration)',
+        'Debes enviar al menos un campo a actualizar: price, message o estimated_duration',
       );
     }
 
@@ -326,19 +375,24 @@ export class ProposalsService {
       .eq('id', proposalId)
       .maybeSingle();
 
-    const proposal = proposalResponse.data;
-    const proposalError = proposalResponse.error;
-
-    if (proposalError) {
-      throw new InternalServerErrorException(proposalError.message);
+    if (proposalResponse.error) {
+      throw new InternalServerErrorException(proposalResponse.error.message);
     }
 
-    if (!proposal) {
+    if (!proposalResponse.data) {
       throw new NotFoundException('Propuesta no encontrada');
     }
 
+    const proposal = proposalResponse.data as any;
+
     if (proposal.technician_id !== technicianId) {
       throw new ForbiddenException('No puedes editar esta propuesta');
+    }
+
+    if (proposal.status !== 'pending') {
+      throw new BadRequestException(
+        'No se puede editar una propuesta que ya fue procesada',
+      );
     }
 
     const serviceResponse = await this.supabaseService.sb
@@ -347,21 +401,17 @@ export class ProposalsService {
       .eq('id', proposal.service_id)
       .maybeSingle();
 
-    const service = serviceResponse.data;
-    const serviceError = serviceResponse.error;
-
-    if (serviceError) {
-      throw new InternalServerErrorException(serviceError.message);
+    if (serviceResponse.error) {
+      throw new InternalServerErrorException(serviceResponse.error.message);
     }
 
-    if (!service) {
+    if (!serviceResponse.data) {
       throw new NotFoundException('Servicio asociado no encontrado');
     }
 
-    if (
-      service.status !== 'requested' ||
-      service.assigned_worker_id !== null
-    ) {
+    const service = serviceResponse.data as any;
+
+    if (service.status !== 'requested' || service.assigned_worker_id !== null) {
       throw new BadRequestException(
         'No se puede editar la propuesta: el trabajo ya no acepta ofertas',
       );
@@ -376,9 +426,11 @@ export class ProposalsService {
     if (dto.price !== undefined) {
       updatePayload.price = dto.price;
     }
+
     if (dto.message !== undefined) {
       updatePayload.message = dto.message;
     }
+
     if (dto.estimated_duration !== undefined) {
       updatePayload.estimated_duration = dto.estimated_duration;
     }
@@ -391,13 +443,42 @@ export class ProposalsService {
       .select()
       .single();
 
-    const data = updateResponse.data;
-    const error = updateResponse.error;
+    if (updateResponse.error) {
+      throw new InternalServerErrorException(updateResponse.error.message);
+    }
+
+    if (!updateResponse.data) {
+      throw new InternalServerErrorException(
+        'No se pudo actualizar la propuesta',
+      );
+    }
+
+    const updatedProposal = updateResponse.data as any;
+
+    return {
+      message: 'Propuesta actualizada exitosamente',
+      proposal: {
+        id: updatedProposal.id,
+        serviceId: updatedProposal.service_id,
+        technicianId: updatedProposal.technician_id,
+        price: Number(updatedProposal.price),
+        message: updatedProposal.message,
+        estimatedDuration: updatedProposal.estimated_duration,
+        status: updatedProposal.status,
+        createdAt: updatedProposal.created_at
+          ? new Date(updatedProposal.created_at)
+          : null,
+        availableDate: updatedProposal.available_date,
+        availableFrom: updatedProposal.available_from,
+        availableTo: updatedProposal.available_to,
+      },
+    };
   }
 
-
-  async findMineForWorker(technicianId: string, status?: 'pending' | 'accepted') {
-    // Build query: proposals JOIN services JOIN service_categories
+  async findMineForWorker(
+    technicianId: string,
+    status?: 'pending' | 'accepted',
+  ) {
     let query = this.supabaseService.sb
       .from('proposals')
       .select(
@@ -431,7 +512,6 @@ export class ProposalsService {
       .eq('technician_id', technicianId)
       .order('created_at', { ascending: false });
 
-    // Apply optional status filter
     if (status) {
       query = query.eq('status', status);
     }
@@ -448,30 +528,31 @@ export class ProposalsService {
       const service = p.services ?? {};
       const category = service.service_categories ?? {};
 
-      // Compute a human-readable status_label for the proposal
       const statusLabelMap: Record<string, string> = {
         pending: 'Tu postulación está en revisión',
         accepted: 'Propuesta aceptada',
         rejected: 'Propuesta no seleccionada',
       };
 
-      // Compute relative time from created_at
       const createdAt = p.created_at ? new Date(p.created_at) : null;
       let createdAtRelative = '';
+
       if (createdAt) {
         const diffMs = Date.now() - createdAt.getTime();
         const diffMin = Math.floor(diffMs / 60000);
+
         if (diffMin < 60) {
           createdAtRelative = `Hace ${diffMin} min`;
         } else if (diffMin < 1440) {
-          createdAtRelative = `Hace ${Math.floor(diffMin / 60)} hora${Math.floor(diffMin / 60) > 1 ? 's' : ''}`;
+          const hours = Math.floor(diffMin / 60);
+          createdAtRelative = `Hace ${hours} hora${hours > 1 ? 's' : ''}`;
         } else {
-          createdAtRelative = `Hace ${Math.floor(diffMin / 1440)} día${Math.floor(diffMin / 1440) > 1 ? 's' : ''}`;
+          const days = Math.floor(diffMin / 1440);
+          createdAtRelative = `Hace ${days} día${days > 1 ? 's' : ''}`;
         }
       }
 
       return {
-        // Proposal fields
         id: p.id,
         proposal_status: p.status,
         status_label: statusLabelMap[p.status] ?? p.status,
@@ -481,7 +562,7 @@ export class ProposalsService {
         available_date: p.available_date ?? null,
         available_from: p.available_from ?? null,
         available_to: p.available_to ?? null,
-        // Mission/Service fields (flat, MissionModel-compatible)
+
         service_id: p.service_id,
         service_title: service.title ?? null,
         description: service.description ?? null,
@@ -489,7 +570,7 @@ export class ProposalsService {
         status: service.status ?? null,
         price_min: service.budget_min ?? null,
         price_max: service.budget_max ?? null,
-        // Category
+
         category_name: category.name ?? null,
       };
     });

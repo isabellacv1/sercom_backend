@@ -98,7 +98,7 @@ export class AuthService {
         address: profile.address ?? null,
         city: profile.city ?? null,
         bio: profile.bio ?? null,
-      }
+      },
     };
   }
 }
