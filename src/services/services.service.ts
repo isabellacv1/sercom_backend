@@ -352,6 +352,71 @@ export class ServicesService {
     return updatedService;
   }
 
+  async confirmCompletion(userId: string, serviceId: string) {
+    // 1. Obtener el servicio
+    const serviceResponse = await this.supabaseService.sb
+      .from('services')
+      .select('*')
+      .eq('id', serviceId)
+      .maybeSingle();
+
+    const service = serviceResponse.data;
+    const serviceError = serviceResponse.error;
+
+    if (serviceError) {
+      throw new InternalServerErrorException(serviceError.message);
+    }
+
+    if (!service) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
+
+    // 2. Validar que el servicio no esté ya cancelado o completado
+    if (service.status === 'cancelled' || service.status === 'completed') {
+      throw new BadRequestException(
+        'No se puede confirmar un servicio cancelado o que ya está finalizado',
+      );
+    }
+
+    // 3. Determinar rol y preparar actualización
+    let updatePayload: any = {};
+    let isClient = false;
+    let isWorker = false;
+
+    if (service.client_id === userId) {
+      isClient = true;
+      updatePayload = { client_confirmation: true };
+    } else if (service.assigned_worker_id === userId) {
+      isWorker = true;
+      updatePayload = { worker_confirmation: true };
+    } else {
+      throw new ForbiddenException(
+        'Solo el cliente o el trabajador asignado pueden confirmar el servicio',
+      );
+    }
+
+    // 4. Actualizar en Supabase. El trigger se encarga de cambiar el status a 'completed'
+    // si ambas confirmaciones son true y liberar el pago.
+    const updateResponse = await this.supabaseService.sb
+      .from('services')
+      .update(updatePayload)
+      .eq('id', serviceId)
+      .select()
+      .single();
+
+    const updatedService = updateResponse.data;
+    const updateError = updateResponse.error;
+
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
+
+    return {
+      message: `Confirmación de ${isClient ? 'cliente' : 'trabajador'} registrada exitosamente.`,
+      service: updatedService,
+    };
+  }
+
   private isValidStatusTransition(
     currentStatus: ServiceStatus,
     nextStatus: ServiceStatus,
@@ -581,7 +646,10 @@ export class ServicesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return data;
+    return (data || []).map((service: any) => ({
+      ...service,
+      escrow_ui_message: this.getEscrowUiMessage(service),
+    }));
   }
 
   async findOneMine(clientId: string, serviceId: string) {
@@ -607,7 +675,10 @@ export class ServicesService {
       throw new NotFoundException('Servicio no encontrado');
     }
 
-    return data;
+    return {
+      ...data,
+      escrow_ui_message: this.getEscrowUiMessage(data),
+    };
   }
 
  async findCandidateWorkers(clientId: string, serviceId: string) {
@@ -728,11 +799,30 @@ const filteredWorkers =
         offer_count: proposalsCount,
         status_label: this.getStatusLabel(service.status),
         created_at_relative: this.getRelativeTime(new Date(service.created_at)),
+        worker_confirmation: service.worker_confirmation,
+        client_confirmation: service.client_confirmation,
+        escrow_ui_message: this.getEscrowUiMessage(service),
       };
     });
   }
 
-  private getStatusLabel(status: ServiceStatus): string {
+  private getEscrowUiMessage(service: any): string {
+    if (service.status === 'completed') {
+      return 'Servicio finalizado y fondos liberados';
+    }
+    if (service.worker_confirmation === true && service.client_confirmation === false) {
+      return 'Esperando que confirmes para liberar el pago';
+    }
+    if (service.worker_confirmation === false && service.client_confirmation === true) {
+      return 'Esperando que el trabajador confirme la finalización';
+    }
+    if (service.worker_confirmation === false && service.client_confirmation === false && service.status === 'in_progress') {
+      return 'Servicio en ejecución';
+    }
+    return 'Estado pendiente';
+  }
+
+  private getStatusLabel(serviceStatus: ServiceStatus): string {
     const labels: Record<ServiceStatus, string> = {
       requested: 'Recibiendo postulaciones',
       assigned: 'Asignada',
