@@ -354,9 +354,15 @@ export class ServicesService {
       throw new NotFoundException('Servicio no encontrado');
     }
 
-    if (service.status === 'cancelled' || service.status === 'completed') {
+    if (service.status === 'cancelled') {
       throw new BadRequestException(
-        'No se puede confirmar un servicio cancelado o que ya está finalizado',
+        'No se puede confirmar un servicio cancelado',
+      );
+    }
+
+    if (service.status !== 'completed') {
+      throw new BadRequestException(
+        'Solo se puede confirmar cuando el servicio esté marcado como finalizado',
       );
     }
 
@@ -365,9 +371,36 @@ export class ServicesService {
 
     if (service.client_id === userId) {
       isClient = true;
-      updatePayload = { client_confirmation: true };
+
+      if (service.client_confirmation === true) {
+        return {
+          message: 'El cliente ya había confirmado este servicio.',
+          service: {
+            ...service,
+            status_label: this.getStatusLabel(service.status),
+            escrow_ui_message: this.getEscrowUiMessage(service),
+          },
+        };
+      }
+
+      updatePayload = {
+        client_confirmation: true,
+      };
     } else if (service.assigned_worker_id === userId) {
-      updatePayload = { worker_confirmation: true };
+      if (service.worker_confirmation === true) {
+        return {
+          message: 'El trabajador ya había confirmado este servicio.',
+          service: {
+            ...service,
+            status_label: this.getStatusLabel(service.status),
+            escrow_ui_message: this.getEscrowUiMessage(service),
+          },
+        };
+      }
+
+      updatePayload = {
+        worker_confirmation: true,
+      };
     } else {
       throw new ForbiddenException(
         'Solo el cliente o el trabajador asignado pueden confirmar el servicio',
@@ -821,29 +854,35 @@ export class ServicesService {
   }
 
   private getEscrowUiMessage(service: any): string {
-    if (service.status === 'completed') {
+    if (
+      service.status === 'completed' &&
+      service.worker_confirmation === true &&
+      service.client_confirmation === true
+    ) {
       return 'Servicio finalizado y fondos liberados';
     }
 
     if (
+      service.status === 'completed' &&
       service.worker_confirmation === true &&
-      service.client_confirmation === false
+      service.client_confirmation !== true
     ) {
-      return 'Esperando que confirmes para liberar el pago';
+      return 'Esperando que el cliente confirme para liberar el pago';
     }
 
     if (
-      service.worker_confirmation === false &&
+      service.status === 'completed' &&
+      service.worker_confirmation !== true &&
       service.client_confirmation === true
     ) {
       return 'Esperando que el trabajador confirme la finalización';
     }
 
-    if (
-      service.worker_confirmation === false &&
-      service.client_confirmation === false &&
-      service.status === 'in_progress'
-    ) {
+    if (service.status === 'completed') {
+      return 'Servicio finalizado. Esperando confirmación de ambas partes';
+    }
+
+    if (service.status === 'in_progress') {
       return 'Servicio en ejecución';
     }
 
@@ -1072,9 +1111,7 @@ export class ServicesService {
 
     const a =
       Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) *
-        Math.cos(toRad(lat2)) *
-        Math.sin(dLon / 2) ** 2;
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
 
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
