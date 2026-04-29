@@ -1,7 +1,17 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as currentUserDecorator from '../auth/decorators/current-user.decorator';
 import { CreateProposalDto } from './dto/create-proposal.dto';
+import { UpdateProposalDto } from './dto/update-proposal.dto';
 import { ProposalResponseDto } from './dto/proposal-response.dto';
 import { ProposalsService } from './proposals.service';
 
@@ -9,6 +19,15 @@ import { ProposalsService } from './proposals.service';
 @Controller('proposals')
 export class ProposalsController {
   constructor(private readonly proposalsService: ProposalsService) {}
+
+  @Patch(':id')
+  update(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProposalDto,
+  ) {
+    return this.proposalsService.update(user.sub, id, dto);
+  }
 
   @Post()
   async create(

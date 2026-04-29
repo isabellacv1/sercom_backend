@@ -2,17 +2,34 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { Database } from '../types/supabase';
 import { AppRoles } from 'src/auth/interfaces/app-roles';
 
 type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
+type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
 type ProfileStatus = Database['public']['Enums']['profile_status'];
 
 @Injectable()
 export class ProfilesService {
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  async findAll() {
+    const { data, error } = await this.supabaseService.client
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new InternalServerErrorException(
+        'Error al obtener los perfiles',
+      );
+    }
+
+    return data;
+  }
 
   async findByEmail(email: string) {
     const { data, error } = await this.supabaseService.client
@@ -82,30 +99,77 @@ export class ProfilesService {
     return data;
   }
 
-  async updateStatus(userId: string, status: ProfileStatus) {
+  async updatePersonalInfo(
+    userId: string,
+    dto: {
+      full_name?: string;
+      fullName?: string;
+      phone?: string;
+      address?: string;
+    },
+  ) {
+    const profile = await this.findByUserId(userId);
+
+    if (!profile) {
+      throw new NotFoundException('Perfil no encontrado');
+    }
+
+    const fullName = dto.full_name ?? dto.fullName;
+
+    const payload: ProfileUpdate = {};
+
+    if (fullName !== undefined) {
+      payload.full_name = fullName.trim();
+    }
+
+    if (dto.phone !== undefined) {
+      payload.phone = dto.phone.trim();
+    }
+
+    if (dto.address !== undefined) {
+      payload.address = dto.address.trim();
+    }
+
+    if (Object.keys(payload).length === 0) {
+      throw new BadRequestException(
+        'Debes enviar al menos un campo para actualizar',
+      );
+    }
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
-      .update({ status })
+      .update(payload)
       .eq('id', userId)
-      .select()
+      .select('*')
       .single();
 
     if (error) {
-      throw new InternalServerErrorException(
-        'Error al actualizar el estado del perfil',
-      );
+      throw new InternalServerErrorException(error.message);
     }
 
     return data;
   }
 
-  async findAll() {
+  async updateStatus(userId: string, status: ProfileStatus) {
+    const profile = await this.findByUserId(userId);
+
+    if (!profile) {
+      throw new NotFoundException('Perfil no encontrado');
+    }
+
+    const payload: ProfileUpdate = {
+      status,
+    };
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
-      .select('*');
+      .update(payload)
+      .eq('id', userId)
+      .select('*')
+      .single();
 
     if (error) {
-      throw new InternalServerErrorException('Error al obtener los perfiles');
+      throw new InternalServerErrorException(error.message);
     }
 
     return data;
@@ -118,51 +182,64 @@ export class ProfilesService {
 
     const validRoles = Object.values(AppRoles);
 
-    const isValid = roles.every(role => validRoles.includes(role));
+    const isValid = roles.every((role) => validRoles.includes(role));
 
     if (!isValid) {
       throw new BadRequestException('Roles inválidos');
     }
 
-    const { data, error } = await this.supabaseService.sb
+    const payload: ProfileUpdate = {
+      roles,
+      active_role: roles[0],
+    };
+
+    const { data, error } = await this.supabaseService.client
       .from('profiles')
-      .update({
-        roles: roles as string[],
-        active_role: roles[0] as string, //default
-      })
+      .update(payload)
       .eq('id', userId)
-      .select()
+      .select('*')
       .single();
 
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
 
     return data;
   }
 
-  async changeActiveRole(user: any, active_role: AppRoles) {
-    const { data: profile, error } = await this.supabaseService.sb
+  async changeActiveRole(user: any, activeRole: AppRoles) {
+    const { data: profile, error } = await this.supabaseService.client
       .from('profiles')
       .select('roles')
       .eq('id', user.sub)
       .single();
 
-    if (error) throw new InternalServerErrorException(error.message);
+    if (error) {
+      throw new InternalServerErrorException(error.message);
+    }
 
-    if (!profile.roles?.includes(active_role)) {
-      if (active_role === AppRoles.WORKER) {
+    if (!profile.roles?.includes(activeRole)) {
+      if (activeRole === AppRoles.WORKER) {
         throw new BadRequestException('USER_NOT_ACTIVATED_AS_WORKER');
       }
+
       throw new BadRequestException('No tienes ese rol');
     }
 
-    const { data, error: updateError } = await this.supabaseService.sb
+    const payload: ProfileUpdate = {
+      active_role: activeRole,
+    };
+
+    const { data, error: updateError } = await this.supabaseService.client
       .from('profiles')
-      .update({ active_role })
+      .update(payload)
       .eq('id', user.sub)
-      .select()
+      .select('*')
       .single();
 
-    if (updateError) throw new InternalServerErrorException(updateError.message);
+    if (updateError) {
+      throw new InternalServerErrorException(updateError.message);
+    }
 
     return data;
   }

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as currentUserDecorator from '../auth/decorators/current-user.decorator';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -8,11 +16,20 @@ import { AssignWorkerDto } from './dto/assign-worker.dto';
 import { UpdateServiceStatusDto } from './dto/update-service-status.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
+import { FindOpportunitiesQueryDto } from './dto/find-opportunities-query.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('services')
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
+
+  @Get('opportunities')
+  findOpportunities(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Query() query: FindOpportunitiesQueryDto,
+  ) {
+    return this.servicesService.findOpportunities(user.sub, query);
+  }
 
   @Patch(':id/assign-worker')
   assignWorker(
