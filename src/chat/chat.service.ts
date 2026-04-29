@@ -10,7 +10,7 @@ import { CreateMessageDto } from './dto/create-message.dto';
             return this.supabaseService.sb;
             }
 
-        async getRoomByServiceId(serviceId: string) {
+       async getRoomByServiceId(serviceId: string) {
         const { data, error } = await this.supabase
             .from('chat_rooms')
             .select(`
@@ -19,6 +19,11 @@ import { CreateMessageDto } from './dto/create-message.dto';
             client_id,
             worker_id,
             created_at,
+            service:services!chat_rooms_service_id_fkey (
+                id,
+                title,
+                status
+            ),
             client:profiles!chat_rooms_client_id_fkey (
                 id,
                 full_name,
@@ -131,85 +136,82 @@ import { CreateMessageDto } from './dto/create-message.dto';
 
 
         async getUserRooms(userId: string) {
-        const { data, error } = await this.supabase
-            .from('chat_rooms')
-            .select(`
-            id,
-            service_id,
-            client_id,
-            worker_id,
-            created_at,
-            client:profiles!chat_rooms_client_id_fkey (
+            const { data, error } = await this.supabase
+                .from('chat_rooms')
+                .select(`
                 id,
-                full_name,
-                profile_image_url
-            ),
-            worker:profiles!chat_rooms_worker_id_fkey (
-                id,
-                full_name,
-                profile_image_url
-            ),
-            chat_messages (
-                id,
-                room_id,
-                sender_id,
-                content,
+                service_id,
+                client_id,
+                worker_id,
                 created_at,
-                is_read,
-                message_type,
-                attachment_url
-            )
-            `)
-            .or(`client_id.eq.${userId},worker_id.eq.${userId}`);
+                service:services!chat_rooms_service_id_fkey (
+                    id,
+                    title,
+                    status
+                ),
+                client:profiles!chat_rooms_client_id_fkey (
+                    id,
+                    full_name,
+                    profile_image_url
+                ),
+                worker:profiles!chat_rooms_worker_id_fkey (
+                    id,
+                    full_name,
+                    profile_image_url
+                ),
+                chat_messages (
+                    id,
+                    room_id,
+                    sender_id,
+                    content,
+                    created_at,
+                    is_read,
+                    message_type,
+                    attachment_url
+                )
+                `)
+                .or(`client_id.eq.${userId},worker_id.eq.${userId}`);
 
-        if (error) {
-            throw new BadRequestException(error.message);
-        }
+            if (error) {
+                throw new BadRequestException(error.message);
+            }
 
-        const roomsWithInfo = (data ?? []).map((room: any) => {
-            const messages = [...(room.chat_messages ?? [])].sort(
-            (a, b) =>
-                new Date(b.created_at).getTime() -
-                new Date(a.created_at).getTime(),
+            const roomsWithInfo = (data ?? []).map((room: any) => {
+                const messages = [...(room.chat_messages ?? [])].sort(
+                (a, b) =>
+                    new Date(b.created_at).getTime() -
+                    new Date(a.created_at).getTime(),
+                );
+
+                const lastMessage = messages[0] ?? null;
+
+                const unreadCount = messages.filter(
+                (message) =>
+                    message.sender_id !== userId &&
+                    message.is_read === false,
+                ).length;
+
+                const participant =
+                room.client_id === userId ? room.worker : room.client;
+
+                return {
+                ...room,
+                participant,
+                lastMessage,
+                lastMessagePreview: lastMessage?.content ?? 'Sin mensajes todavía',
+                updated_at: lastMessage?.created_at ?? room.created_at,
+                unreadCount,
+                };
+            });
+
+            roomsWithInfo.sort(
+                (a, b) =>
+                new Date(b.updated_at).getTime() -
+                new Date(a.updated_at).getTime(),
             );
 
-            const lastMessage = messages[0] ?? null;
-
-            const unreadCount = messages.filter(
-            (message) =>
-                message.sender_id !== userId &&
-                message.is_read === false,
-            ).length;
-
-            const participant =
-            room.client_id === userId ? room.worker : room.client;
-
-            return {
-            ...room,
-
-            // Para que Flutter tenga directo el otro usuario
-            participant,
-
-            // Para último mensaje
-            lastMessage,
-            lastMessagePreview: lastMessage?.content ?? 'Sin mensajes todavía',
-
-            // Para ordenar y mostrar hora
-            updated_at: lastMessage?.created_at ?? room.created_at,
-
-            // Para mostrar mensaje nuevo
-            unreadCount,
-            };
-        });
-
-        roomsWithInfo.sort(
-            (a, b) =>
-            new Date(b.updated_at).getTime() -
-            new Date(a.updated_at).getTime(),
-        );
-
-        return roomsWithInfo;
-        }
+            return roomsWithInfo;
+            }
 
 
           async getRoomById(roomId: string) {
