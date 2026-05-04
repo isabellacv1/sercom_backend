@@ -9,12 +9,14 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { AddPortfolioItemDto } from './dto/add-portfolio-item.dto';
 import {
   SetCoverageZonesDto,
+  SetWorkerSkillsDto,
   UpdateWorkerProfileDto,
   ZONE_NAMES,
   ZoneId,
 } from './dto/update-worker-profile.dto';
 
 const MAX_PORTFOLIO_ITEMS = 10;
+const PORTFOLIO_BUCKET = 'user-documents';
 
 @Injectable()
 export class WorkerProfileService {
@@ -99,6 +101,84 @@ export class WorkerProfileService {
     return data;
   }
 
+  async getSkills(workerId: string) {
+    const { data, error } = await this.supabaseService.client
+      .from('worker_skills')
+      .select(
+        'id, category_id, years_experience, base_price, is_active, service_categories(id, name, icon)',
+      )
+      .eq('worker_id', workerId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (error)
+      throw new InternalServerErrorException('Error al obtener categorías');
+    return data;
+  }
+
+  async setWorkerSkills(workerId: string, dto: SetWorkerSkillsDto) {
+    await this.getVerifiedWorkerProfile(workerId);
+
+    const categoryIds = dto.skills.map((skill) => skill.category_id);
+    const uniqueCategoryIds = [...new Set(categoryIds)];
+
+    if (uniqueCategoryIds.length !== categoryIds.length) {
+      throw new BadRequestException(
+        'No puedes seleccionar categorías repetidas',
+      );
+    }
+
+    const { data: validCategories, error: categoriesError } =
+      await this.supabaseService.client
+        .from('service_categories')
+        .select('id')
+        .in('id', uniqueCategoryIds)
+        .eq('is_active', true);
+
+    if (categoriesError)
+      throw new InternalServerErrorException('Error al validar categorías');
+
+    const validIds = new Set(
+      (validCategories ?? []).map((category) => category.id),
+    );
+    const invalidIds = uniqueCategoryIds.filter(
+      (categoryId) => !validIds.has(categoryId),
+    );
+
+    if (invalidIds.length > 0) {
+      throw new BadRequestException(
+        'Una o más categorías no pertenecen al catálogo oficial activo',
+      );
+    }
+
+    const { error: deleteError } = await this.supabaseService.client
+      .from('worker_skills')
+      .delete()
+      .eq('worker_id', workerId);
+
+    if (deleteError)
+      throw new InternalServerErrorException('Error al actualizar categorías');
+
+    const rows = dto.skills.map((skill) => ({
+      worker_id: workerId,
+      category_id: skill.category_id,
+      years_experience: skill.years_experience ?? null,
+      base_price: skill.base_price ?? null,
+      is_active: true,
+    }));
+
+    const { data, error } = await this.supabaseService.client
+      .from('worker_skills')
+      .insert(rows)
+      .select(
+        'id, category_id, years_experience, base_price, is_active, service_categories(id, name, icon)',
+      );
+
+    if (error)
+      throw new InternalServerErrorException('Error al guardar categorías');
+    return data;
+  }
+
   // ─── Portafolio ───────────────────────────────────────────────────────────
 
   async getPortfolio(workerId: string) {
@@ -148,6 +228,76 @@ export class WorkerProfileService {
     return data;
   }
 
+  async uploadPortfolioFile(
+    workerId: string,
+    file: Express.Multer.File,
+    title?: string,
+  ) {
+    await this.getVerifiedWorkerProfile(workerId);
+
+    this.validatePortfolioFile(file);
+
+    const cleanTitle = title?.trim();
+
+    if (cleanTitle && cleanTitle.length > 80) {
+      throw new BadRequestException(
+        'El título no puede superar los 80 caracteres',
+      );
+    }
+
+    const { count, error: countError } = await this.supabaseService.client
+      .from('worker_portfolio_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('worker_id', workerId);
+
+    if (countError)
+      throw new InternalServerErrorException('Error al verificar portafolio');
+    if ((count ?? 0) >= MAX_PORTFOLIO_ITEMS) {
+      throw new BadRequestException(
+        `El portafolio no puede tener más de ${MAX_PORTFOLIO_ITEMS} archivos`,
+      );
+    }
+
+    const fileType = this.getPortfolioFileType(file);
+    const safeName = this.sanitizeFileName(file.originalname);
+    const storagePath = `workers/${workerId}/portfolio/${Date.now()}-${safeName}`;
+    const supabase = this.supabaseService.client;
+
+    const upload = await supabase.storage
+      .from(PORTFOLIO_BUCKET)
+      .upload(storagePath, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
+
+    if (upload.error) {
+      throw new InternalServerErrorException(
+        `Error al subir archivo de portafolio: ${upload.error.message}`,
+      );
+    }
+
+    const fileUrl = supabase.storage
+      .from(PORTFOLIO_BUCKET)
+      .getPublicUrl(storagePath).data.publicUrl;
+
+    const { data, error } = await this.supabaseService.client
+      .from('worker_portfolio_items')
+      .insert({
+        worker_id: workerId,
+        file_url: fileUrl,
+        file_type: fileType,
+        title: cleanTitle || safeName,
+      })
+      .select('id, file_url, file_type, title, created_at')
+      .single();
+
+    if (error)
+      throw new InternalServerErrorException(
+        'Error al guardar item del portafolio',
+      );
+    return data;
+  }
+
   async removePortfolioItem(workerId: string, itemId: string) {
     // Verificar que el item le pertenece al worker
     const { data: item, error: findError } = await this.supabaseService.client
@@ -193,15 +343,8 @@ export class WorkerProfileService {
     }
 
     // Debe tener al menos una categoría activa (worker_skills)
-    const { data: skills, error: skillsError } =
-      await this.supabaseService.client
-        .from('worker_skills')
-        .select('id')
-        .eq('worker_id', workerId)
-        .eq('is_active', true);
+    const skills = await this.getSkills(workerId);
 
-    if (skillsError)
-      throw new InternalServerErrorException('Error al verificar categorías');
     if (!skills || skills.length === 0) {
       throw new BadRequestException(
         'Debes tener al menos una categoría para publicar',
@@ -249,29 +392,80 @@ export class WorkerProfileService {
           .single(),
         this.getCoverageZones(workerId),
         this.getPortfolio(workerId),
-        this.supabaseService.client
-          .from('worker_skills')
-          .select(
-            'id, category_id, years_experience, base_price, is_active, service_categories(id, name, icon)',
-          )
-          .eq('worker_id', workerId)
-          .eq('is_active', true),
+        this.getSkills(workerId),
       ]);
 
     if (profileResult.error)
       throw new InternalServerErrorException('Error al obtener el perfil');
-    if (skillsResult.error)
-      throw new InternalServerErrorException('Error al obtener habilidades');
 
     return {
       profile: profileResult.data,
       coverage_zones: zonesResult,
       portfolio: portfolioResult,
-      skills: skillsResult.data,
+      skills: skillsResult,
       can_publish:
         profileResult.data.status === 'verified' &&
         (zonesResult?.length ?? 0) > 0 &&
-        (skillsResult.data?.length ?? 0) > 0,
+        (skillsResult?.length ?? 0) > 0,
     };
+  }
+
+  private validatePortfolioFile(file: Express.Multer.File) {
+    const allowedMimeTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'video/mp4',
+      'video/quicktime',
+      'video/webm',
+    ];
+
+    const allowedExtensions = [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.webp',
+      '.mp4',
+      '.mov',
+      '.webm',
+    ];
+    const fileName = file.originalname.toLowerCase();
+    const hasAllowedMimeType = allowedMimeTypes.includes(file.mimetype);
+    const hasAllowedExtension = allowedExtensions.some((extension) =>
+      fileName.endsWith(extension),
+    );
+
+    if (!hasAllowedMimeType && !hasAllowedExtension) {
+      throw new BadRequestException(
+        `Tipo de archivo no permitido: ${file.originalname}`,
+      );
+    }
+
+    const maxSizeInBytes = 20 * 1024 * 1024;
+
+    if (file.size > maxSizeInBytes) {
+      throw new BadRequestException(
+        `El archivo ${file.originalname} supera el tamaño máximo permitido de 20 MB`,
+      );
+    }
+  }
+
+  private getPortfolioFileType(file: Express.Multer.File): 'image' | 'video' {
+    const fileName = file.originalname.toLowerCase();
+
+    if (
+      file.mimetype.startsWith('video/') ||
+      fileName.endsWith('.mp4') ||
+      fileName.endsWith('.mov') ||
+      fileName.endsWith('.webm')
+    ) {
+      return 'video';
+    }
+
+    return 'image';
+  }
+
+  private sanitizeFileName(fileName: string) {
+    return fileName.replace(/\s+/g, '-').replace(/[^\w.-]/g, '');
   }
 }
