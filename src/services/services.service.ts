@@ -280,6 +280,37 @@ export class ServicesService {
       );
     }
 
+    if (nextStatus === 'on_the_way' || nextStatus === 'in_progress') {
+      const paymentResponse = await this.supabaseService.sb
+        .from('payments')
+        .select('id, status, provider')
+        .eq('service_id', serviceId)
+        .eq('client_id', service.client_id)
+        .eq('worker_id', workerId)
+        .maybeSingle();
+
+      const payment = paymentResponse.data;
+      const paymentError = paymentResponse.error;
+
+      if (paymentError) {
+        throw new InternalServerErrorException(
+          'No se pudo validar el estado del pago',
+        );
+      }
+
+      if (!payment) {
+        throw new BadRequestException(
+          'El servicio no puede iniciar porque no existe un pago asociado',
+        );
+      }
+
+      if (payment.status !== 'held') {
+        throw new BadRequestException(
+          'El servicio no puede iniciar hasta que el pago esté garantizado por el cliente',
+        );
+      }
+    }
+
     const updatePayload: ServiceUpdate = {
       status: nextStatus,
     };
@@ -530,7 +561,7 @@ export class ServicesService {
         service_id: serviceId,
         status: 'assigned',
         changed_by: clientId,
-        note: `Técnico asignado: ${workerId}`,
+        note: `Técnico asignado: ${workerId}. Pendiente pago del cliente.`,
       });
 
     const historyError = historyResponse.error;
@@ -854,12 +885,24 @@ export class ServicesService {
   }
 
   private getEscrowUiMessage(service: any): string {
+    if (service.status === 'assigned') {
+      return 'Técnico asignado. El cliente debe realizar el pago por Mercado Pago para garantizar la reserva.';
+    }
+
+    if (service.status === 'on_the_way') {
+      return 'Pago garantizado. El técnico va en camino.';
+    }
+
+    if (service.status === 'in_progress') {
+      return 'Servicio en ejecución. El pago está retenido por la plataforma.';
+    }
+
     if (
       service.status === 'completed' &&
       service.worker_confirmation === true &&
       service.client_confirmation === true
     ) {
-      return 'Servicio finalizado y fondos liberados';
+      return 'Servicio finalizado y fondos listos para liberación.';
     }
 
     if (
@@ -867,7 +910,7 @@ export class ServicesService {
       service.worker_confirmation === true &&
       service.client_confirmation !== true
     ) {
-      return 'Esperando que el cliente confirme para liberar el pago';
+      return 'Esperando que el cliente confirme para liberar el pago.';
     }
 
     if (
@@ -875,15 +918,11 @@ export class ServicesService {
       service.worker_confirmation !== true &&
       service.client_confirmation === true
     ) {
-      return 'Esperando que el trabajador confirme la finalización';
+      return 'Esperando que el trabajador confirme la finalización.';
     }
 
     if (service.status === 'completed') {
-      return 'Servicio finalizado. Esperando confirmación de ambas partes';
-    }
-
-    if (service.status === 'in_progress') {
-      return 'Servicio en ejecución';
+      return 'Servicio finalizado. Esperando confirmación de ambas partes.';
     }
 
     return 'Estado pendiente';

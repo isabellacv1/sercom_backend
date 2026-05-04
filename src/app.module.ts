@@ -12,6 +12,7 @@ import { ServiceAssignmentsModule } from './service-assignments/service-assignme
 import { ProposalsModule } from './proposals/proposals.module';
 import { ChatModule } from './chat/chat.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
     ServiceAssignmentsModule,
     ChatModule,
     WorkerProfileModule,
+    PaymentsModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],

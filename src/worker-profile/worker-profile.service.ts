@@ -6,121 +6,130 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
-import {
-  AddPortfolioItemDto,
-} from './dto/add-portfolio-item.dto';
+import { AddPortfolioItemDto } from './dto/add-portfolio-item.dto';
 import {
   SetCoverageZonesDto,
   UpdateWorkerProfileDto,
   ZONE_NAMES,
   ZoneId,
 } from './dto/update-worker-profile.dto';
- 
+
 const MAX_PORTFOLIO_ITEMS = 10;
- 
+
 @Injectable()
 export class WorkerProfileService {
   constructor(private readonly supabaseService: SupabaseService) {}
- 
+
   // ─── Helpers privados ────────────────────────────────────────────────────
- 
+
   private async getVerifiedWorkerProfile(workerId: string) {
     const { data: profile, error } = await this.supabaseService.client
       .from('profiles')
       .select('id, status, roles, is_published, bio')
       .eq('id', workerId)
       .maybeSingle();
- 
-    if (error) throw new InternalServerErrorException('Error al obtener el perfil');
+
+    if (error)
+      throw new InternalServerErrorException('Error al obtener el perfil');
     if (!profile) throw new NotFoundException('Perfil no encontrado');
     if (!profile.roles?.includes('worker')) {
       throw new ForbiddenException('El usuario no tiene rol de trabajador');
     }
     return profile;
   }
- 
+
   // ─── Bio ─────────────────────────────────────────────────────────────────
- 
+
   async updateBio(workerId: string, dto: UpdateWorkerProfileDto) {
     await this.getVerifiedWorkerProfile(workerId);
- 
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
       .update({ bio: dto.bio ?? null })
       .eq('id', workerId)
       .select('id, bio, is_published, status')
       .single();
- 
-    if (error) throw new InternalServerErrorException('Error al actualizar la biografía');
+
+    if (error)
+      throw new InternalServerErrorException(
+        'Error al actualizar la biografía',
+      );
     return data;
   }
- 
+
   // ─── Zonas de cobertura ───────────────────────────────────────────────────
- 
+
   async getCoverageZones(workerId: string) {
     const { data, error } = await this.supabaseService.client
       .from('worker_coverage_zones')
       .select('id, zone_id, zone_name, created_at')
       .eq('worker_id', workerId)
       .order('zone_id');
- 
-    if (error) throw new InternalServerErrorException('Error al obtener las zonas');
+
+    if (error)
+      throw new InternalServerErrorException('Error al obtener las zonas');
     return data;
   }
- 
+
   async setCoverageZones(workerId: string, dto: SetCoverageZonesDto) {
     await this.getVerifiedWorkerProfile(workerId);
- 
+
     // Borramos las existentes y re-insertamos (replace completo)
     const { error: deleteError } = await this.supabaseService.client
       .from('worker_coverage_zones')
       .delete()
       .eq('worker_id', workerId);
- 
-    if (deleteError) throw new InternalServerErrorException('Error al actualizar zonas');
- 
+
+    if (deleteError)
+      throw new InternalServerErrorException('Error al actualizar zonas');
+
     const rows = dto.zone_ids.map((zone_id) => ({
       worker_id: workerId,
       zone_id,
       zone_name: ZONE_NAMES[zone_id as ZoneId],
     }));
- 
+
     const { data, error } = await this.supabaseService.client
       .from('worker_coverage_zones')
       .insert(rows)
       .select('id, zone_id, zone_name');
- 
-    if (error) throw new InternalServerErrorException('Error al guardar las zonas');
+
+    if (error)
+      throw new InternalServerErrorException('Error al guardar las zonas');
     return data;
   }
- 
+
   // ─── Portafolio ───────────────────────────────────────────────────────────
- 
+
   async getPortfolio(workerId: string) {
     const { data, error } = await this.supabaseService.client
       .from('worker_portfolio_items')
       .select('id, file_url, file_type, title, created_at')
       .eq('worker_id', workerId)
       .order('created_at', { ascending: false });
- 
-    if (error) throw new InternalServerErrorException('Error al obtener el portafolio');
+
+    if (error)
+      throw new InternalServerErrorException('Error al obtener el portafolio');
     return data;
   }
- 
+
   async addPortfolioItem(workerId: string, dto: AddPortfolioItemDto) {
     await this.getVerifiedWorkerProfile(workerId);
- 
+
     // Verificar límite de 10 items
     const { count, error: countError } = await this.supabaseService.client
       .from('worker_portfolio_items')
       .select('id', { count: 'exact', head: true })
       .eq('worker_id', workerId);
- 
-    if (countError) throw new InternalServerErrorException('Error al verificar portafolio');
+
+    if (countError)
+      throw new InternalServerErrorException('Error al verificar portafolio');
     if ((count ?? 0) >= MAX_PORTFOLIO_ITEMS) {
-      throw new BadRequestException(`El portafolio no puede tener más de ${MAX_PORTFOLIO_ITEMS} archivos`);
+      throw new BadRequestException(
+        `El portafolio no puede tener más de ${MAX_PORTFOLIO_ITEMS} archivos`,
+      );
     }
- 
+
     const { data, error } = await this.supabaseService.client
       .from('worker_portfolio_items')
       .insert({
@@ -131,11 +140,14 @@ export class WorkerProfileService {
       })
       .select('id, file_url, file_type, title, created_at')
       .single();
- 
-    if (error) throw new InternalServerErrorException('Error al agregar item al portafolio');
+
+    if (error)
+      throw new InternalServerErrorException(
+        'Error al agregar item al portafolio',
+      );
     return data;
   }
- 
+
   async removePortfolioItem(workerId: string, itemId: string) {
     // Verificar que el item le pertenece al worker
     const { data: item, error: findError } = await this.supabaseService.client
@@ -143,97 +155,114 @@ export class WorkerProfileService {
       .select('id, worker_id')
       .eq('id', itemId)
       .maybeSingle();
- 
-    if (findError) throw new InternalServerErrorException('Error al buscar el item');
+
+    if (findError)
+      throw new InternalServerErrorException('Error al buscar el item');
     if (!item) throw new NotFoundException('Item no encontrado');
-    if (item.worker_id !== workerId) throw new ForbiddenException('No puedes eliminar este item');
- 
+    if (item.worker_id !== workerId)
+      throw new ForbiddenException('No puedes eliminar este item');
+
     const { error } = await this.supabaseService.client
       .from('worker_portfolio_items')
       .delete()
       .eq('id', itemId);
- 
-    if (error) throw new InternalServerErrorException('Error al eliminar el item');
+
+    if (error)
+      throw new InternalServerErrorException('Error al eliminar el item');
     return { message: 'Item eliminado correctamente' };
   }
- 
+
   // ─── Publicar / despublicar ───────────────────────────────────────────────
- 
+
   async publishProfile(workerId: string) {
     const profile = await this.getVerifiedWorkerProfile(workerId);
- 
+
     // Criterio de aceptación: solo si está verified
     if (profile.status !== 'verified') {
       throw new ForbiddenException(
         'Tu perfil debe estar verificado para poder publicarlo',
       );
     }
- 
+
     // Debe tener al menos una zona
     const zones = await this.getCoverageZones(workerId);
     if (!zones || zones.length === 0) {
-      throw new BadRequestException('Debes tener al menos una zona de cobertura para publicar');
+      throw new BadRequestException(
+        'Debes tener al menos una zona de cobertura para publicar',
+      );
     }
- 
+
     // Debe tener al menos una categoría activa (worker_skills)
-    const { data: skills, error: skillsError } = await this.supabaseService.client
-      .from('worker_skills')
-      .select('id')
-      .eq('worker_id', workerId)
-      .eq('is_active', true);
- 
-    if (skillsError) throw new InternalServerErrorException('Error al verificar categorías');
+    const { data: skills, error: skillsError } =
+      await this.supabaseService.client
+        .from('worker_skills')
+        .select('id')
+        .eq('worker_id', workerId)
+        .eq('is_active', true);
+
+    if (skillsError)
+      throw new InternalServerErrorException('Error al verificar categorías');
     if (!skills || skills.length === 0) {
-      throw new BadRequestException('Debes tener al menos una categoría para publicar');
+      throw new BadRequestException(
+        'Debes tener al menos una categoría para publicar',
+      );
     }
- 
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
       .update({ is_published: true })
       .eq('id', workerId)
       .select('id, is_published, status, bio')
       .single();
- 
-    if (error) throw new InternalServerErrorException('Error al publicar el perfil');
+
+    if (error)
+      throw new InternalServerErrorException('Error al publicar el perfil');
     return data;
   }
- 
+
   async unpublishProfile(workerId: string) {
     await this.getVerifiedWorkerProfile(workerId);
- 
+
     const { data, error } = await this.supabaseService.client
       .from('profiles')
       .update({ is_published: false })
       .eq('id', workerId)
       .select('id, is_published, status')
       .single();
- 
-    if (error) throw new InternalServerErrorException('Error al despublicar el perfil');
+
+    if (error)
+      throw new InternalServerErrorException('Error al despublicar el perfil');
     return data;
   }
- 
+
   // ─── Vista completa del perfil del trabajador ─────────────────────────────
- 
+
   async getMyWorkerProfile(workerId: string) {
     const [profileResult, zonesResult, portfolioResult, skillsResult] =
       await Promise.all([
         this.supabaseService.client
           .from('profiles')
-          .select('id, full_name, email, phone, profile_image_url, bio, is_published, status, rating_avg, rating_count')
+          .select(
+            'id, full_name, email, phone, profile_image_url, bio, is_published, status, rating_avg, rating_count',
+          )
           .eq('id', workerId)
           .single(),
         this.getCoverageZones(workerId),
         this.getPortfolio(workerId),
         this.supabaseService.client
           .from('worker_skills')
-          .select('id, category_id, years_experience, base_price, is_active, service_categories(id, name, icon)')
+          .select(
+            'id, category_id, years_experience, base_price, is_active, service_categories(id, name, icon)',
+          )
           .eq('worker_id', workerId)
           .eq('is_active', true),
       ]);
- 
-    if (profileResult.error) throw new InternalServerErrorException('Error al obtener el perfil');
-    if (skillsResult.error) throw new InternalServerErrorException('Error al obtener habilidades');
- 
+
+    if (profileResult.error)
+      throw new InternalServerErrorException('Error al obtener el perfil');
+    if (skillsResult.error)
+      throw new InternalServerErrorException('Error al obtener habilidades');
+
     return {
       profile: profileResult.data,
       coverage_zones: zonesResult,

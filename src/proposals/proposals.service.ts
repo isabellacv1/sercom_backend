@@ -341,7 +341,9 @@ export class ProposalsService {
       .single();
 
     if (updateServiceResponse.error) {
-      throw new InternalServerErrorException(updateServiceResponse.error.message);
+      throw new InternalServerErrorException(
+        updateServiceResponse.error.message,
+      );
     }
 
     if (!updateServiceResponse.data) {
@@ -350,15 +352,95 @@ export class ProposalsService {
       );
     }
 
+    const amountTotal = Number(proposal.price);
+
+    if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
+      throw new BadRequestException(
+        'La propuesta aceptada no tiene un valor válido para generar el pago',
+      );
+    }
+
+    const commissionAmount = Math.round(amountTotal * 0.1);
+    const workerAmount = amountTotal - commissionAmount;
+
+    const existingPaymentResponse = await this.supabaseService.sb
+      .from('payments')
+      .select('id, status')
+      .eq('service_id', proposal.service_id)
+      .maybeSingle();
+
+    if (existingPaymentResponse.error) {
+      throw new InternalServerErrorException(
+        existingPaymentResponse.error.message,
+      );
+    }
+
+    if (existingPaymentResponse.data) {
+      throw new ConflictException('Este servicio ya tiene un pago asociado');
+    }
+
+    const paymentResponse = await this.supabaseService.sb
+      .from('payments')
+      .insert({
+        service_id: proposal.service_id,
+        client_id: clientId,
+        worker_id: proposal.technician_id,
+        amount_total: amountTotal,
+        commission_amount: commissionAmount,
+        worker_amount: workerAmount,
+        currency: 'COP',
+        provider: 'mercadopago',
+        payment_method: 'mercadopago_link',
+        provider_reference: null,
+        checkout_url: 'https://link.mercadopago.com.co/sercomi',
+        status: 'pending',
+      } as any)
+      .select()
+      .single();
+
+    if (paymentResponse.error) {
+      throw new InternalServerErrorException(
+        `La propuesta fue aceptada, pero no se pudo crear el pago pendiente: ${paymentResponse.error.message}`,
+      );
+    }
+
+    if (!paymentResponse.data) {
+      throw new InternalServerErrorException(
+        'La propuesta fue aceptada, pero no se pudo crear el pago pendiente',
+      );
+    }
+
+    const historyResponse = await this.supabaseService.sb
+      .from('service_status_history')
+      .insert({
+        service_id: proposal.service_id,
+        status: 'assigned',
+        changed_by: clientId,
+        note: `Propuesta aceptada. Trabajador asignado: ${proposal.technician_id}. Pago pendiente por Wompi.`,
+      });
+
+    if (historyResponse.error) {
+      throw new InternalServerErrorException(
+        `La propuesta fue aceptada, pero no se pudo registrar el historial: ${historyResponse.error.message}`,
+      );
+    }
+
     return {
-      message: 'Propuesta aceptada y trabajador asignado',
+      message:
+        'Propuesta aceptada y trabajador asignado. El cliente debe pagar con Mercado Pago para garantizar la reserva.',
       assignment: assignmentResponse.data,
       chatRoom: chatRoomResponse.data,
       service: updateServiceResponse.data,
+      payment: paymentResponse.data,
+      checkout_url: 'https://link.mercadopago.com.co/sercomi',
     };
   }
 
-  async update(technicianId: string, proposalId: string, dto: UpdateProposalDto) {
+  async update(
+    technicianId: string,
+    proposalId: string,
+    dto: UpdateProposalDto,
+  ) {
     if (
       dto.price === undefined &&
       dto.message === undefined &&

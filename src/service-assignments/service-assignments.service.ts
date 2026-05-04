@@ -9,6 +9,8 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceAssignmentDto } from './dto/create-service-assignment.dto';
 import { RespondServiceAssignmentDto } from './dto/respond-service-assignment.dto';
 
+const MERCADO_PAGO_CHECKOUT_URL = 'https://link.mercadopago.com.co/sercomi';
+
 type ServiceRow = {
   id: string;
   client_id: string;
@@ -17,7 +19,9 @@ type ServiceRow = {
 
 type WorkerProfileRow = {
   id: string;
-  role: string;
+  role?: string | null;
+  roles?: string[] | null;
+  active_role?: string | null;
   is_active: boolean;
   status: string;
 };
@@ -27,6 +31,7 @@ type AssignmentWithServiceRow = {
   service_id: string;
   worker_id: string;
   status: string;
+  proposed_price: number | null;
   services:
     | {
         id: string;
@@ -50,7 +55,7 @@ export class ServiceAssignmentsService {
 
     const { data: worker, error: workerError } = await supabase
       .from('profiles')
-      .select('id, role, is_active, status')
+      .select('id, role, roles, active_role, is_active, status')
       .eq('id', workerId)
       .maybeSingle<WorkerProfileRow>();
 
@@ -58,7 +63,13 @@ export class ServiceAssignmentsService {
       throw new InternalServerErrorException('Error al validar el trabajador');
     }
 
-    if (!worker || worker.role !== 'worker') {
+    const roles = Array.isArray(worker?.roles) ? worker.roles : [];
+    const isWorker =
+      worker?.role === 'worker' ||
+      worker?.active_role === 'worker' ||
+      roles.includes('worker');
+
+    if (!worker || !isWorker) {
       throw new ForbiddenException('Solo los trabajadores pueden ofertar');
     }
 
@@ -232,12 +243,13 @@ export class ServiceAssignmentsService {
         service_id,
         worker_id,
         status,
+        proposed_price,
         services:service_id (
           id,
           client_id,
           status
         )
-      `,
+        `,
       )
       .eq('id', assignmentId)
       .maybeSingle<AssignmentWithServiceRow>();
@@ -271,6 +283,37 @@ export class ServiceAssignmentsService {
     if (dto.status === 'accepted') {
       const now = new Date().toISOString();
 
+      const amountTotal = Number(assignment.proposed_price ?? 0);
+
+      if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
+        throw new BadRequestException(
+          'La oferta aceptada no tiene un valor válido para generar el pago',
+        );
+      }
+
+      const commissionRate = 0.1;
+      const commissionAmount = Math.round(amountTotal * commissionRate);
+      const workerAmount = amountTotal - commissionAmount;
+
+      const { data: existingPayment, error: existingPaymentError } =
+        await supabase
+          .from('payments')
+          .select('id, status, checkout_url')
+          .eq('service_id', assignment.service_id)
+          .maybeSingle();
+
+      if (existingPaymentError) {
+        throw new InternalServerErrorException(
+          'No se pudo validar si el servicio ya tiene pago',
+        );
+      }
+
+      if (existingPayment) {
+        throw new BadRequestException(
+          'Este servicio ya tiene un pago asociado',
+        );
+      }
+
       const { error: acceptError } = await supabase
         .from('service_assignments')
         .update({
@@ -300,17 +343,56 @@ export class ServiceAssignmentsService {
         );
       }
 
-      const { error: serviceUpdateError } = await supabase
+      const { data: updatedService, error: serviceUpdateError } = await supabase
         .from('services')
         .update({
           assigned_worker_id: assignment.worker_id,
           status: 'assigned',
         })
-        .eq('id', assignment.service_id);
+        .eq('id', assignment.service_id)
+        .select()
+        .single();
 
       if (serviceUpdateError) {
         throw new InternalServerErrorException(
           'La oferta fue aceptada, pero no se actualizo el servicio',
+        );
+      }
+
+      if (!updatedService) {
+        throw new InternalServerErrorException(
+          'La oferta fue aceptada, pero no se obtuvo el servicio actualizado',
+        );
+      }
+
+      const { data: payment, error: paymentError } = await supabase
+        .from('payments')
+        .insert({
+          service_id: assignment.service_id,
+          client_id: clientId,
+          worker_id: assignment.worker_id,
+          amount_total: amountTotal,
+          commission_amount: commissionAmount,
+          worker_amount: workerAmount,
+          currency: 'COP',
+          status: 'pending',
+          provider: 'mercadopago',
+          payment_method: 'mercadopago_link',
+          provider_reference: null,
+          checkout_url: MERCADO_PAGO_CHECKOUT_URL,
+        } as any)
+        .select()
+        .single();
+
+      if (paymentError) {
+        throw new InternalServerErrorException(
+          `La oferta fue aceptada, pero no se pudo crear el pago pendiente: ${paymentError.message}`,
+        );
+      }
+
+      if (!payment) {
+        throw new InternalServerErrorException(
+          'La oferta fue aceptada, pero no se pudo crear el pago pendiente',
         );
       }
 
@@ -320,7 +402,7 @@ export class ServiceAssignmentsService {
           service_id: assignment.service_id,
           status: 'assigned',
           changed_by: clientId,
-          note: `Propuesta aceptada para el trabajador ${assignment.worker_id}`,
+          note: `Oferta aceptada. Trabajador asignado: ${assignment.worker_id}. Pago pendiente por Mercado Pago.`,
         });
 
       if (historyError) {
@@ -330,8 +412,13 @@ export class ServiceAssignmentsService {
       }
 
       return {
-        message: 'Oferta aceptada correctamente',
+        message:
+          'Oferta aceptada correctamente. El cliente debe pagar con Mercado Pago para garantizar la reserva.',
         service_status: 'assigned',
+        payment_status: payment.status,
+        checkout_url: MERCADO_PAGO_CHECKOUT_URL,
+        service: updatedService,
+        payment,
       };
     }
 
