@@ -13,6 +13,7 @@ import { ProposalsModule } from './proposals/proposals.module';
 import { ChatModule } from './chat/chat.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { PaymentsModule } from './payments/payments.module';
     ChatModule,
     WorkerProfileModule,
     PaymentsModule,
+    ChatbotModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],
