@@ -1,14 +1,31 @@
 import {
+  BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
-import { WorkerCompletedCertView } from './interfaces/completed-worker-certifications.interface';
+import { EnrollmentProgressView, ModuleWithProgress, WorkerCompletedCertView } from './interfaces/completed-worker-certifications.interface';
+import { CompleteModuleDto } from './dto/completed-module.dto';
 
 @Injectable()
 export class CertificationsService {
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  private async findEnrollmentOrFail(workerId: string, certificationId: string) {
+    const { data, error } = await this.supabaseService.client
+      .from('worker_certifications')
+      .select('id, status, completed_modules, total_modules, completed_at, enrolled_at, updated_at')
+      .eq('worker_id', workerId)
+      .eq('certification_id', certificationId)
+      .maybeSingle();
+
+    if (error) throw new InternalServerErrorException('Error al buscar la inscripción');
+    if (!data)  throw new NotFoundException('No estás inscrito en esta certificación');
+
+    return data;
+  }
 
   async getWorkerCompletedCertifications(workerId: string): Promise<WorkerCompletedCertView> {
    
@@ -58,5 +75,104 @@ export class CertificationsService {
       total_completed:   certifications.length,
       has_certifications: certifications.length > 0,
     };
+  }
+
+  async getMyProgress(workerId: string, certificationId: string): Promise<EnrollmentProgressView> {
+    const enrollment = await this.findEnrollmentOrFail(workerId, certificationId);
+
+    const { data: certification, error: certError } = await this.supabaseService.client
+      .from('certifications')
+      .select('id, name, category, difficulty, duration_hours')
+      .eq('id', certificationId)
+      .single();
+
+    if (certError || !certification) {
+      throw new InternalServerErrorException('Error al obtener la certificación');
+    }
+
+    const { data: modules, error: modulesError } = await this.supabaseService.client
+      .from('certification_modules')
+      .select('id, title, description, order_index, is_active, created_at, updated_at')
+      .eq('certification_id', certificationId)
+      .eq('is_active', true)
+      .order('order_index', { ascending: true });
+
+    if (modulesError) throw new InternalServerErrorException('Error al obtener los módulos');
+
+    const { data: completedRows, error: progressError } = await this.supabaseService.client
+      .from('worker_module_progress')
+      .select('module_id, completed_at')
+      .eq('enrollment_id', enrollment.id);
+
+    if (progressError) throw new InternalServerErrorException('Error al obtener el progreso');
+
+    const completedMap = new Map(
+      (completedRows ?? []).map((row) => [row.module_id, row.completed_at]),
+    );
+
+    const modulesWithProgress: ModuleWithProgress[] = (modules ?? []).map((mod) => ({
+      ...mod,
+      certification_id: certificationId,
+      is_completed: completedMap.has(mod.id),
+      completed_at: completedMap.get(mod.id) ?? null,
+    }));
+
+    const total = modulesWithProgress.length;
+    const completed = modulesWithProgress.filter((m) => m.is_completed).length;
+    const progressPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return {
+      enrollment: enrollment as any,
+      certification,
+      progress_percent: progressPercent,
+      modules: modulesWithProgress,
+    };
+  }
+
+  async completeModule(
+    workerId: string,
+    certificationId: string,
+    dto: CompleteModuleDto,
+  ) {
+    const enrollment = await this.findEnrollmentOrFail(workerId, certificationId);
+
+    if (enrollment.status === 'completed') {
+      throw new BadRequestException('Esta certificación ya está completada');
+    }
+
+    const { data: module, error: moduleError } = await this.supabaseService.client
+      .from('certification_modules')
+      .select('id, title, certification_id, is_active')
+      .eq('id', dto.module_id)
+      .eq('certification_id', certificationId)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (moduleError) throw new InternalServerErrorException('Error al verificar el módulo');
+    if (!module)     throw new NotFoundException('Módulo no encontrado en esta certificación');
+
+    const { data: existing, error: existingError } = await this.supabaseService.client
+      .from('worker_module_progress')
+      .select('id')
+      .eq('enrollment_id', enrollment.id)
+      .eq('module_id', dto.module_id)
+      .maybeSingle();
+
+    if (existingError) throw new InternalServerErrorException('Error al verificar el módulo');
+    if (existing)      throw new ConflictException('Este módulo ya fue completado');
+
+    const { error: insertError } = await this.supabaseService.client
+      .from('worker_module_progress')
+      .insert({
+        worker_id:     workerId,
+        enrollment_id: enrollment.id,
+        module_id:     dto.module_id,
+      });
+
+    if (insertError) {
+      throw new InternalServerErrorException('Error al registrar el módulo como completado');
+    }
+
+    return this.getMyProgress(workerId, certificationId);
   }
 }
