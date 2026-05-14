@@ -1,15 +1,10 @@
-import {
-  Injectable,
-  InternalServerErrorException,
-} from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 
 import { GeminiProvider } from './providers/gemini.provider';
 
 @Injectable()
 export class ChatbotService {
-  constructor(
-    private readonly geminiProvider: GeminiProvider,
-  ) {}
+  constructor(private readonly geminiProvider: GeminiProvider) {}
 
   async processMessage(message: string) {
     try {
@@ -20,7 +15,7 @@ export class ChatbotService {
       };
     } catch (error) {
       throw new InternalServerErrorException(
-        'Error procesando mensaje',
+        'Error procesando mensaje ' + error,
       );
     }
   }
