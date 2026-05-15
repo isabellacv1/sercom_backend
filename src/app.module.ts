@@ -14,6 +14,7 @@ import { ChatModule } from './chat/chat.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
+import { CertificationsModule } from './certifications/certifications.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
     WorkerProfileModule,
     PaymentsModule,
     ChatbotModule,
+    CertificationsModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],
