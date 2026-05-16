@@ -25,6 +25,12 @@ export class CertificationsController {
   }
   
   @Auth(AppRoles.WORKER)
+  @Get('me/enrollments')
+  getMyEnrollments(@CurrentUser() user: JwtUser) {
+    return this.certificationsService.getMyEnrollments(user.sub);
+  }
+
+  @Auth(AppRoles.WORKER)
   @Get(':certificationId/me/progress')
   getMyProgress(
     @CurrentUser() user: JwtUser,

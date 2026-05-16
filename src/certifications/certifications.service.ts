@@ -49,6 +49,7 @@ export class CertificationsService {
         certifications (
           id,
           name,
+          description,
           category,
           difficulty
         )
@@ -75,6 +76,24 @@ export class CertificationsService {
       total_completed:   certifications.length,
       has_certifications: certifications.length > 0,
     };
+  }
+
+  async getMyEnrollments(workerId: string) {
+    const { data: enrollments, error } = await this.supabaseService.client
+      .from('worker_certifications')
+      .select('id, status, completed_modules, total_modules, completed_at, enrolled_at, updated_at, certification_id')
+      .eq('worker_id', workerId)
+      .order('enrolled_at', { ascending: false });
+
+    if (error) throw new InternalServerErrorException('Error al obtener inscripciones');
+
+    const results = await Promise.all(
+      (enrollments ?? []).map((e) =>
+        this.getMyProgress(workerId, e.certification_id)
+      )
+    );
+
+    return results;
   }
 
   async getMyProgress(workerId: string, certificationId: string): Promise<EnrollmentProgressView> {
