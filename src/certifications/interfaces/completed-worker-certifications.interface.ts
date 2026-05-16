@@ -12,6 +12,7 @@ export interface WorkerCompletedCertView {
     certification: {
       id: string;
       name: string;
+      description: string | null;
       category: string;
       difficulty:
         | 'beginner'
