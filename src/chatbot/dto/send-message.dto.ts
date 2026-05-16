@@ -1,8 +1,20 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsString,
+} from 'class-validator';
+
+export class ChatMessageDto {
+
+  @IsString()
+  text: string;
+
+  @IsBoolean()
+  isUser: boolean;
+}
 
 export class SendMessageDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(500)
-  message: string;
+
+  @IsArray()
+  messages: ChatMessageDto[];
 }

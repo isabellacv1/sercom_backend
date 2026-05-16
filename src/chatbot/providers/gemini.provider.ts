@@ -1,67 +1,60 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 
 import { ConfigService } from '@nestjs/config';
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-import { CHATBOT_SYSTEM_PROMPT } from '../utils/chatbot-prompts';
+import { ChatbotResponseDto } from '../dto/chatbot-response.dto';
 
-import { cleanChatbotResponse } from '../utils/chatbot-formatter';
+import { CHATBOT_SYSTEM_PROMPT } from '../utils/chatbot-prompts';
 
 @Injectable()
 export class GeminiProvider {
-  private readonly genAI: GoogleGenerativeAI;
-
-  // memoria temporal simple
-  private conversationHistory: string[] = [];
+  private genAI: GoogleGenerativeAI;
 
   constructor(private readonly configService: ConfigService) {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
-
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY no está definida');
-    }
-
-    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.genAI = new GoogleGenerativeAI(
+      this.configService.get<string>('GEMINI_API_KEY')!,
+    );
   }
 
-  async generateResponse(message: string): Promise<string> {
+  async generateResponse(messages: any[]): Promise<ChatbotResponseDto> {
     try {
       const model = this.genAI.getGenerativeModel({
         model: 'gemini-2.5-flash',
       });
 
-      // guardar mensaje usuario
-      this.conversationHistory.push(`Usuario: ${message}`);
+      const conversation = messages
+        .map((m) => {
+          return `${m.isUser
+              ? 'Usuario'
+              : 'Asistente'
+          }: ${m.text}`;
 
-      // limitar historial
-      if (this.conversationHistory.length > 6) {
-        this.conversationHistory.shift();
-      }
+        })
+        .join('\n');
 
       const prompt = `
-${CHATBOT_SYSTEM_PROMPT}
+  ${CHATBOT_SYSTEM_PROMPT}
 
-Historial conversación:
-${this.conversationHistory.join('\n')}
-`;
+  Conversación:
+  ${conversation}
+  `;
 
       const result = await model.generateContent(prompt);
 
       const rawResponse = result.response.text();
 
-      const cleanedResponse = cleanChatbotResponse(rawResponse);
+      const cleanedResponse = rawResponse
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim();
 
-      // guardar respuesta IA
-      this.conversationHistory.push(`Asistente: ${cleanedResponse}`);
-
-      return cleanedResponse;
+      return JSON.parse(cleanedResponse);
     } catch (error) {
       console.error(error);
 
-      throw new ServiceUnavailableException(
-        'La IA no está disponible actualmente',
-      );
+      throw new InternalServerErrorException('Error generando respuesta IA');
     }
   }
 }
