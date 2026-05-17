@@ -48,4 +48,19 @@ export class CertificationsController {
   ) {
     return this.certificationsService.completeModule(user.sub, certificationId, dto);
   }
+
+
+  @Get()
+  findAll(
+    @Query('category') category?: string,
+  ) {
+    return this.certificationsService.findAll(category);
+  }
+
+  @Get(':id')
+  findOne(
+    @Param('id') id: string,
+  ) {
+    return this.certificationsService.findOne(id);
+  }
 }

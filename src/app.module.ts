@@ -15,6 +15,8 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { CertificationsModule } from './certifications/certifications.module';
+import { CertificationModulesModule } from './certification_modules/certification_modules.module';
+import { WorkerCertificationsModule } from './worker_certifications/worker_certifications.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { CertificationsModule } from './certifications/certifications.module';
     PaymentsModule,
     ChatbotModule,
     CertificationsModule,
+    CertificationModulesModule,
+    WorkerCertificationsModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],

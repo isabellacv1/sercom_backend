@@ -194,4 +194,75 @@ export class CertificationsService {
 
     return this.getMyProgress(workerId, certificationId);
   }
+
+
+  async findAll(category?: string) {
+  let query = this.supabaseService.client
+    .from('certifications')
+    .select(`
+      id,
+      name,
+      description,
+      category,
+      difficulty,
+      duration_hours
+    `)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+
+  if (category) {
+    query = query.eq('category', category);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new InternalServerErrorException(
+      'Error al obtener certificaciones',
+    );
+  }
+
+  return {
+    certifications: data ?? [],
+    total: data?.length ?? 0,
+  };
+}
+
+async findOne(id: string) {
+  const { data: certification, error } =
+    await this.supabaseService.client
+      .from('certifications')
+      .select(`
+        id,
+        name,
+        description,
+        category,
+        difficulty,
+        duration_hours,
+        certification_modules (
+          id,
+          title,
+          description,
+          order_index
+        )
+      `)
+      .eq('id', id)
+      .eq('is_active', true)
+      .eq('certification_modules.is_active', true)
+      .single();
+
+  if (error) {
+    throw new InternalServerErrorException(
+      'Error al obtener certificación',
+    );
+  }
+
+  if (!certification) {
+    throw new NotFoundException(
+      'Certificación no encontrada',
+    );
+  }
+
+  return certification;
+}
 }
