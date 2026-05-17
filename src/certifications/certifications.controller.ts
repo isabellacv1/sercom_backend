@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CertificationsService } from './certifications.service';
 import { Auth } from '../auth/decorators/auth.decorator';
