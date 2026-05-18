@@ -265,4 +265,84 @@ async findOne(id: string) {
 
   return certification;
 }
+
+async enroll(workerId: string, certificationId: string) {
+  // Verificar que la certificación exista y esté activa
+  const { data: certification, error: certError } =
+    await this.supabaseService.client
+      .from('certifications')
+      .select('id, is_active')
+      .eq('id', certificationId)
+      .maybeSingle();
+
+  if (certError) {
+    throw new InternalServerErrorException(
+      'Error al verificar la certificación',
+    );
+  }
+
+  if (!certification || !certification.is_active) {
+    throw new NotFoundException(
+      'La certificación no existe o no está disponible',
+    );
+  }
+
+  // Verificar si ya está inscrito
+  const { data: existingEnrollment, error: existingError } =
+    await this.supabaseService.client
+      .from('worker_certifications')
+      .select('id')
+      .eq('worker_id', workerId)
+      .eq('certification_id', certificationId)
+      .maybeSingle();
+
+  if (existingError) {
+    throw new InternalServerErrorException(
+      'Error al verificar la inscripción',
+    );
+  }
+
+  if (existingEnrollment) {
+    throw new ConflictException(
+      'Ya estás inscrito en esta certificación',
+    );
+  }
+
+  // Contar módulos activos
+  const { count, error: modulesError } =
+    await this.supabaseService.client
+      .from('certification_modules')
+      .select('*', { count: 'exact', head: true })
+      .eq('certification_id', certificationId)
+      .eq('is_active', true);
+
+  if (modulesError) {
+    throw new InternalServerErrorException(
+      'Error al contar módulos',
+    );
+  }
+
+  const totalModules = count ?? 0;
+
+  // Crear inscripción
+  const { error: insertError } =
+    await this.supabaseService.client
+      .from('worker_certifications')
+      .insert({
+        worker_id: workerId,
+        certification_id: certificationId,
+        status: 'enrolled',
+        completed_modules: 0,
+        total_modules: totalModules,
+      });
+
+  if (insertError) {
+    throw new InternalServerErrorException(
+      'Error al realizar la inscripción',
+    );
+  }
+
+  // Retornar progreso completo
+  return this.getMyProgress(workerId, certificationId);
+}
 }

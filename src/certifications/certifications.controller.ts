@@ -64,4 +64,16 @@ export class CertificationsController {
   ) {
     return this.certificationsService.findOne(id);
   }
+
+  @Auth(AppRoles.WORKER)
+  @Post(':id/enroll')
+  enroll(
+    @CurrentUser() user: JwtUser,
+    @Param('id', ParseUUIDPipe) certificationId: string,
+  ) {
+    return this.certificationsService.enroll(
+      user.sub,
+      certificationId,
+    );
+  }
 }
