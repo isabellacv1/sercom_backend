@@ -71,6 +71,8 @@ export class CertificationsController {
     @CurrentUser() user: JwtUser,
     @Param('id', ParseUUIDPipe) certificationId: string,
   ) {
+
+    console.log(user);
     return this.certificationsService.enroll(
       user.sub,
       certificationId,

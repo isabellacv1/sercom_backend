@@ -267,7 +267,6 @@ async findOne(id: string) {
 }
 
 async enroll(workerId: string, certificationId: string) {
-  // Verificar que la certificación exista y esté activa
   const { data: certification, error: certError } =
     await this.supabaseService.client
       .from('certifications')
@@ -287,7 +286,6 @@ async enroll(workerId: string, certificationId: string) {
     );
   }
 
-  // Verificar si ya está inscrito
   const { data: existingEnrollment, error: existingError } =
     await this.supabaseService.client
       .from('worker_certifications')
@@ -308,7 +306,6 @@ async enroll(workerId: string, certificationId: string) {
     );
   }
 
-  // Contar módulos activos
   const { count, error: modulesError } =
     await this.supabaseService.client
       .from('certification_modules')
@@ -317,6 +314,8 @@ async enroll(workerId: string, certificationId: string) {
       .eq('is_active', true);
 
   if (modulesError) {
+    console.log(modulesError);
+
     throw new InternalServerErrorException(
       'Error al contar módulos',
     );
@@ -324,8 +323,7 @@ async enroll(workerId: string, certificationId: string) {
 
   const totalModules = count ?? 0;
 
-  // Crear inscripción
-  const { error: insertError } =
+  const { data: enrollment, error: insertError } =
     await this.supabaseService.client
       .from('worker_certifications')
       .insert({
@@ -334,15 +332,22 @@ async enroll(workerId: string, certificationId: string) {
         status: 'enrolled',
         completed_modules: 0,
         total_modules: totalModules,
-      });
+      })
+      .select()
+      .single();
+
+  console.log(enrollment);
 
   if (insertError) {
+    console.log(insertError);
+
     throw new InternalServerErrorException(
       'Error al realizar la inscripción',
     );
   }
 
-  // Retornar progreso completo
-  return this.getMyProgress(workerId, certificationId);
+  return {
+    message: 'Inscripción realizada correctamente',
+  };
 }
 }
