@@ -12,32 +12,27 @@ import { ConfirmMercadoPagoPaymentDto } from './dto/confirm-mercadopago-payment.
 
 @Injectable()
 export class PaymentsService {
-  private readonly mercadoPagoLink =
-    'https://link.mercadopago.com.co/sercomi';
+  private readonly mercadoPagoLink = 'link.mercadopago.com.co/sercomprueba';
 
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly configService: ConfigService,
   ) {}
 
-  async createMercadoPagoLink(
-    clientId: string,
-    dto: CreateMercadoPagoLinkDto,
-  ) {
-    const { data: service, error: serviceError } =
-      await this.supabaseService.sb
-        .from('services')
-        .select(
-          `
+  async createMercadoPagoLink(clientId: string, dto: CreateMercadoPagoLinkDto) {
+    const { data: service, error: serviceError } = await this.supabaseService.sb
+      .from('services')
+      .select(
+        `
           id,
           client_id,
           assigned_worker_id,
           status,
           title
         `,
-        )
-        .eq('id', dto.service_id)
-        .maybeSingle();
+      )
+      .eq('id', dto.service_id)
+      .maybeSingle();
 
     if (serviceError) {
       throw new InternalServerErrorException(serviceError.message);
@@ -63,13 +58,12 @@ export class PaymentsService {
       throw new BadRequestException('El servicio no tiene técnico asignado');
     }
 
-    const { data: payment, error: paymentError } =
-      await this.supabaseService.sb
-        .from('payments')
-        .select('*')
-        .eq('service_id', service.id)
-        .eq('client_id', clientId)
-        .maybeSingle();
+    const { data: payment, error: paymentError } = await this.supabaseService.sb
+      .from('payments')
+      .select('*')
+      .eq('service_id', service.id)
+      .eq('client_id', clientId)
+      .maybeSingle();
 
     if (paymentError) {
       throw new InternalServerErrorException(paymentError.message);

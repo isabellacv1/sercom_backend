@@ -13,6 +13,9 @@ import { Auth } from 'src/auth/decorators/auth.decorator';
 import { CurrentUser } from 'src/auth/decorators/current-user.decorator';
 import { AppRoles } from 'src/auth/interfaces/app-roles';
 import type { JwtUser } from 'src/auth/decorators/current-user.decorator';
+import { UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 
 @Controller('profiles')
 export class ProfilesController {
@@ -22,6 +25,24 @@ export class ProfilesController {
   @Get()
   findAll() {
     return this.profilesService.findAll();
+  }
+
+  @Auth()
+  @Patch('me/photo')
+  @UseInterceptors(
+    FileInterceptor('worker_photo', { storage: memoryStorage() }),
+  )
+  async updatePhoto(
+    @CurrentUser() user: JwtUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No se ha proporcionado ninguna imagen');
+    }
+
+    // Aquí llamas a tu servicio para procesar el archivo en memoria (subirlo a Cloudinary, etc.)
+    // Tu profilesService debería encargarse de guardar la nueva URL en la base de datos.
+    return this.profilesService.updateProfilePhoto(user.sub, file);
   }
 
   @Auth()

@@ -7,6 +7,7 @@ import {
 import { SupabaseService } from '../supabase/supabase.service';
 import { Database } from '../types/supabase';
 import { AppRoles } from 'src/auth/interfaces/app-roles';
+import { randomUUID } from 'crypto';
 
 type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
 type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
@@ -27,6 +28,56 @@ type CreateProfileDto = {
 @Injectable()
 export class ProfilesService {
   constructor(private readonly supabaseService: SupabaseService) {}
+
+  async updateProfilePhoto(userId: string, file: Express.Multer.File) {
+    const profile = await this.findByUserId(userId);
+    if (!profile) {
+      throw new NotFoundException('Perfil no encontrado');
+    }
+
+    try {
+      const bucketName = 'worker-documents';
+      const safeOriginalName = file.originalname.replace(
+        /[^a-zA-Z0-9.-]/g,
+        '_',
+      );
+      const filePath = `${userId}/foto-${randomUUID()}-${safeOriginalName}`;
+
+      const { error: uploadError } = await this.supabaseService.client.storage
+        .from(bucketName)
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype || 'application/octet-stream',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new InternalServerErrorException(
+          `Error al subir a Supabase Storage: ${uploadError.message}`,
+        );
+      }
+
+      const { data } = this.supabaseService.client.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+
+      const photoUrl = data.publicUrl;
+
+      const updatedProfile = {
+        ...profile,
+        worker_photo_url: photoUrl,
+        workerPhotoUrl: photoUrl,
+      };
+
+      return {
+        message: 'Foto de perfil actualizada con éxito',
+        profile: updatedProfile,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Error al procesar o guardar la imagen: ${error.message}`,
+      );
+    }
+  }
 
   async findAll() {
     const { data, error } = await this.supabaseService.client
