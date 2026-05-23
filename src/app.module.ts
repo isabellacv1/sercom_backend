@@ -18,6 +18,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
 import { CertificationsModule } from './certifications/certifications.module';
 import { CertificationModulesModule } from './certification_modules/certification_modules.module';
 import { WorkerCertificationsModule } from './worker_certifications/worker_certifications.module';
+import { ReviewsModule } from './reviews/reviews.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { WorkerCertificationsModule } from './worker_certifications/worker_certi
     CertificationsModule,
     CertificationModulesModule,
     WorkerCertificationsModule,
+    ReviewsModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],
