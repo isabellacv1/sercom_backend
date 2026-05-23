@@ -39,6 +39,16 @@ export class PaymentsService {
     this.webhookSecret = this.configService.get<string>('MP_WEBHOOK_SECRET');
     this.appUrl = this.configService.get<string>('APP_URL') ?? '';
 
+    if (!this.appUrl) {
+      this.logger.error(
+        'APP_URL no está configurada. Las notification_url y back_urls de Mercado Pago serán inválidas.',
+      );
+    } else if (this.appUrl.includes('localhost') || this.appUrl.includes('127.0.0.1')) {
+      this.logger.warn(
+        `APP_URL apunta a "${this.appUrl}". Mercado Pago no puede alcanzar localhost. Usa un túnel (ngrok) o el dominio de producción.`,
+      );
+    }
+
     // El entorno lo determina el propio token, no NODE_ENV.
     // APP_USR-... → producción (init_point)
     // TEST-...    → sandbox   (sandbox_init_point)
