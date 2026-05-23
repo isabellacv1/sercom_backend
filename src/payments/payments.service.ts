@@ -28,6 +28,7 @@ export class PaymentsService {
   private readonly mpClient: MercadoPagoConfig;
   private readonly webhookSecret: string | undefined;
   private readonly appUrl: string;
+  private readonly frontendUrl: string;
   private readonly isProduction: boolean;
 
   constructor(
@@ -38,6 +39,7 @@ export class PaymentsService {
     const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN');
     this.webhookSecret = this.configService.get<string>('MP_WEBHOOK_SECRET');
     this.appUrl = this.configService.get<string>('APP_URL') ?? '';
+    this.frontendUrl = this.configService.get<string>('MP_FRONTEND_URL') ?? this.appUrl;
 
     if (!this.appUrl) {
       this.logger.error(
@@ -49,11 +51,9 @@ export class PaymentsService {
       );
     }
 
-    // El entorno lo determina el propio token, no NODE_ENV.
     // APP_USR-... → producción (init_point)
     // TEST-...    → sandbox   (sandbox_init_point)
-    this.isProduction =
-      this.configService.get<string>('MP_ENVIRONMENT') === 'production';
+    this.isProduction = !!(accessToken && accessToken.startsWith('APP_USR-'));
 
     if (!accessToken) {
       this.logger.warn(
@@ -155,9 +155,9 @@ export class PaymentsService {
           },
           notification_url: `${this.appUrl}/payments/webhook/mercadopago`,
           back_urls: {
-            success: `${this.appUrl}/payments/result/success`,
-            failure: `${this.appUrl}/payments/result/failure`,
-            pending: `${this.appUrl}/payments/result/pending`,
+            success: `${this.frontendUrl}/payment/success`,
+            failure: `${this.frontendUrl}/payment/failure`,
+            pending: `${this.frontendUrl}/payment/pending`,
           },
           auto_return: 'approved',
           statement_descriptor: 'SerCom',
