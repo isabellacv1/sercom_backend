@@ -11,7 +11,6 @@ import MercadoPagoConfig, {
   Payment as MpPayment,
   Preference,
   WebhookSignatureValidator,
-  InvalidWebhookSignatureError,
 } from 'mercadopago';
 import { SupabaseService } from '../supabase/supabase.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
@@ -29,46 +28,27 @@ export class PaymentsService {
   private readonly webhookSecret: string | undefined;
   private readonly appUrl: string;
   private readonly frontendUrl: string;
-  private readonly isProduction: boolean;
 
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly configService: ConfigService,
     private readonly pushService: PushNotificationsService,
   ) {
-    const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN');
+    const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN') ?? '';
     this.webhookSecret = this.configService.get<string>('MP_WEBHOOK_SECRET');
     this.appUrl = this.configService.get<string>('APP_URL') ?? '';
-    this.frontendUrl = this.configService.get<string>('MP_FRONTEND_URL') ?? this.appUrl;
-
-    if (!this.appUrl) {
-      this.logger.error(
-        'APP_URL no está configurada. Las notification_url y back_urls de Mercado Pago serán inválidas.',
-      );
-    } else if (this.appUrl.includes('localhost') || this.appUrl.includes('127.0.0.1')) {
-      this.logger.warn(
-        `APP_URL apunta a "${this.appUrl}". Mercado Pago no puede alcanzar localhost. Usa un túnel (ngrok) o el dominio de producción.`,
-      );
-    }
-
-    // APP_USR-... → producción (init_point)
-    // TEST-...    → sandbox   (sandbox_init_point)
-    this.isProduction = !!(accessToken && accessToken.startsWith('APP_USR-'));
+    this.frontendUrl =
+      this.configService.get<string>('MP_FRONTEND_URL') ?? this.appUrl;
 
     if (!accessToken) {
-      this.logger.warn(
-        'MP_ACCESS_TOKEN no configurado. La integración con Mercado Pago está desactivada.',
+      this.logger.error(
+        'MP_ACCESS_TOKEN no configurado. Los pagos no funcionarán.',
       );
-      this.mpClient = new MercadoPagoConfig({ accessToken: 'placeholder' });
-    } else {
-      this.logger.log(
-        `Mercado Pago inicializado en modo ${this.isProduction ? 'PRODUCCIÓN' : 'SANDBOX'}.`,
-      );
-      this.mpClient = new MercadoPagoConfig({ accessToken });
     }
+
+    this.mpClient = new MercadoPagoConfig({ accessToken });
   }
 
-  // Alias para evitar repetición
   private get db() {
     return this.supabaseService.sbRaw;
   }
@@ -90,11 +70,6 @@ export class PaymentsService {
 
     const payment = await this.requirePendingPayment(service.id, clientId);
 
-    // Reutilizar preference existente para evitar duplicación
-    if (payment.mp_preference_id && payment.status === 'pending') {
-      return this.buildCheckoutResponse(payment, payment.checkout_url);
-    }
-
     if (payment.status === 'held') {
       const svc = await this.getServiceBasicData(service.id);
       return {
@@ -106,27 +81,15 @@ export class PaymentsService {
 
     this.guardFinalStatus(payment.status as PaymentStatus);
 
-    const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN');
-    if (!accessToken) {
-      const fallbackUrl = this.configService.get<string>('MP_CHECKOUT_URL');
-      if (!fallbackUrl) {
-        throw new InternalServerErrorException(
-          'MP_ACCESS_TOKEN y MP_CHECKOUT_URL no están configurados.',
-        );
-      }
-      const { data: updated } = await this.db
-        .from('payments')
-        .update({
-          checkout_url: fallbackUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', payment.id)
-        .select()
-        .single();
-      return this.buildCheckoutResponse(updated, fallbackUrl);
+    // Reutilizar preference existente si la URL guardada es válida (no sandbox)
+    if (
+      payment.mp_preference_id &&
+      payment.checkout_url &&
+      !payment.checkout_url.includes('sandbox')
+    ) {
+      return this.buildCheckoutResponse(payment, payment.checkout_url);
     }
 
-    // Datos del cliente
     const { data: clientProfile } = await this.db
       .from('profiles')
       .select('full_name')
@@ -177,9 +140,7 @@ export class PaymentsService {
       );
     }
 
-    const checkoutUrl = this.isProduction
-      ? preferenceResult.init_point
-      : preferenceResult.sandbox_init_point;
+    const checkoutUrl: string = preferenceResult.init_point;
 
     const { data: updated, error: updateError } = await this.db
       .from('payments')
@@ -194,9 +155,7 @@ export class PaymentsService {
       .select()
       .single();
 
-    if (updateError) {
-      throw new InternalServerErrorException(updateError.message);
-    }
+    if (updateError) throw new InternalServerErrorException(updateError.message);
 
     await this.logAudit({
       payment_id: payment.id,
@@ -283,7 +242,7 @@ export class PaymentsService {
     return { receipt: this.buildReceipt(payment, service) };
   }
 
-  // ─── Confirmación manual por admin (fallback para link fijo) ────────────────
+  // ─── Confirmación manual por admin ──────────────────────────────────────────
 
   async confirmMercadoPagoPayment(
     userId: string,
@@ -307,9 +266,7 @@ export class PaymentsService {
 
     const status = payment.status as PaymentStatus;
     if (status === 'held') {
-      throw new BadRequestException(
-        'Este pago ya fue confirmado anteriormente',
-      );
+      throw new BadRequestException('Este pago ya fue confirmado anteriormente');
     }
     if (status === 'failed') {
       throw new BadRequestException(
@@ -344,10 +301,7 @@ export class PaymentsService {
         metadata: { provider_reference: dto.provider_reference },
       });
 
-      return {
-        message: 'Pago rechazado. El servicio no puede iniciar.',
-        payment: failed,
-      };
+      return { message: 'Pago rechazado. El servicio no puede iniciar.', payment: failed };
     }
 
     const receiptNumber = `MP-${paymentId}`;
@@ -378,7 +332,6 @@ export class PaymentsService {
 
     await this.notifyWorkerPaymentGuaranteed(held.worker_id);
 
-    // Notificar al cliente
     if (held.client_id) {
       await this.pushService.sendToUser(held.client_id, {
         title: 'Pago recibido',
@@ -404,7 +357,7 @@ export class PaymentsService {
     query: Record<string, string>,
     body: any,
   ) {
-    if (this.webhookSecret && process.env.NODE_ENV === 'production') {
+    if (this.webhookSecret) {
       WebhookSignatureValidator.validate({
         xSignature: xSignature ?? '',
         xRequestId: xRequestId ?? '',
@@ -423,14 +376,6 @@ export class PaymentsService {
 
     if (!mpPaymentId) {
       this.logger.warn('Webhook MP recibido sin data.id');
-      return { received: true };
-    }
-
-    const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN');
-    if (!accessToken) {
-      this.logger.warn(
-        'MP_ACCESS_TOKEN no configurado; no se puede verificar el pago',
-      );
       return { received: true };
     }
 
@@ -466,9 +411,6 @@ export class PaymentsService {
 
     // Idempotencia: no reprocesar el mismo evento
     if (payment.mp_payment_id === mpPaymentId) {
-      this.logger.debug(
-        `Webhook duplicado para mp_payment_id=${mpPaymentId}. Ignorando.`,
-      );
       return { received: true };
     }
 
@@ -484,9 +426,7 @@ export class PaymentsService {
     dto: ReleasePaymentDto,
   ) {
     if (!(await this.isAdmin(userId))) {
-      throw new ForbiddenException(
-        'Solo un administrador puede liberar fondos',
-      );
+      throw new ForbiddenException('Solo un administrador puede liberar fondos');
     }
 
     const { data: payment, error } = await this.db
@@ -538,8 +478,7 @@ export class PaymentsService {
       new_status: 'released',
       source: 'admin',
       changed_by: userId,
-      note:
-        dto.note ?? 'Fondos liberados al técnico tras completar el servicio',
+      note: dto.note ?? 'Fondos liberados al técnico tras completar el servicio',
     });
 
     if (released.worker_id) {
@@ -594,8 +533,7 @@ export class PaymentsService {
       );
     }
 
-    // Intentar reembolso vía API de MP si tenemos el ID real del pago
-    if (payment.mp_payment_id && this.configService.get('MP_ACCESS_TOKEN')) {
+    if (payment.mp_payment_id) {
       try {
         const { PaymentRefund } = await import('mercadopago');
         const refundAPI = new PaymentRefund(this.mpClient);
@@ -604,7 +542,6 @@ export class PaymentsService {
         this.logger.error(
           `Error al reembolsar en MP payment_id=${payment.mp_payment_id}: ${(err as Error).message}`,
         );
-        // Continuar flujo interno; el admin deberá gestionar en portal de MP
       }
     }
 
