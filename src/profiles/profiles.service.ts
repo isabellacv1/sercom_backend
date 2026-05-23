@@ -8,6 +8,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { Database } from '../types/supabase';
 import { AppRoles } from 'src/auth/interfaces/app-roles';
 import { randomUUID } from 'crypto';
+import type { MulterFile } from '../common/types/multer.types';
 
 type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
 type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
@@ -29,7 +30,7 @@ type CreateProfileDto = {
 export class ProfilesService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  async updateProfilePhoto(userId: string, file: Express.Multer.File) {
+  async updateProfilePhoto(userId: string, file: MulterFile) {
     const profile = await this.findByUserId(userId);
     if (!profile) {
       throw new NotFoundException('Perfil no encontrado');

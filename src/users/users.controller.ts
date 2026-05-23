@@ -10,6 +10,7 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UsersDocumentsService } from './users-documents.service';
+import type { MulterFile } from '../common/types/multer.types';
 
 type JwtUser = {
   sub: string;
@@ -33,8 +34,8 @@ export class UsersController {
     @CurrentUser() user: JwtUser,
     @UploadedFiles()
     files: {
-      identityDocument?: Express.Multer.File[];
-      selfiePhoto?: Express.Multer.File[];
+      identityDocument?: MulterFile[];
+      selfiePhoto?: MulterFile[];
     },
   ) {
     const identityDocument = files.identityDocument?.[0];

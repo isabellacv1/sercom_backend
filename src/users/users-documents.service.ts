@@ -6,6 +6,7 @@ import {
 import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { Database } from '../types/supabase';
+import type { MulterFile } from '../common/types/multer.types';
 
 type UserDocumentInsert = Database['public']['Tables']['user_documents']['Insert'];
 
@@ -18,8 +19,8 @@ export class UsersDocumentsService {
 
   async uploadUserDocuments(
     userId: string,
-    identityDocument: Express.Multer.File,
-    selfiePhoto: Express.Multer.File,
+    identityDocument: MulterFile,
+    selfiePhoto: MulterFile,
   ) {
     this.validateFile(identityDocument, [
       'image/jpeg',
@@ -121,7 +122,7 @@ export class UsersDocumentsService {
     };
   }
 
-  private validateFile(file: Express.Multer.File, allowedMimeTypes: string[]) {
+  private validateFile(file: MulterFile, allowedMimeTypes: string[]) {
     if (!allowedMimeTypes.includes(file.mimetype)) {
       throw new BadRequestException(
         `Tipo de archivo no permitido: ${file.originalname}`,

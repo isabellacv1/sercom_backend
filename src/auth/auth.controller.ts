@@ -10,10 +10,11 @@ import { memoryStorage } from 'multer';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import type { MulterFile } from '../common/types/multer.types';
 
 type RegisterUploadedFiles = {
-  cedula_document?: Express.Multer.File[];
-  worker_photo?: Express.Multer.File[];
+  cedula_document?: MulterFile[];
+  worker_photo?: MulterFile[];
 };
 
 @Controller('auth')

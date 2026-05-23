@@ -7,6 +7,7 @@ import { AddPortfolioItemDto } from './dto/add-portfolio-item.dto';
 import { SetCoverageZonesDto, SetWorkerSkillsDto, UpdateWorkerProfileDto } from './dto/update-worker-profile.dto';
 import { WorkerProfileService } from './worker-profile.service';
 import type { JwtUser } from '../auth/decorators/current-user.decorator';
+import type { MulterFile } from '../common/types/multer.types';
  
 @Controller('worker-profile')
 export class WorkerProfileController {
@@ -77,7 +78,7 @@ export class WorkerProfileController {
   @UseInterceptors(FileInterceptor('file'))
   uploadPortfolioFile(
     @CurrentUser() user: JwtUser,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: MulterFile,
     @Body('title') title?: string,
   ) {
     if (!file) {

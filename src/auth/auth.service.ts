@@ -12,10 +12,11 @@ import { LoginDto } from './dto/login.dto';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { RegisterDto } from './dto/register.dto';
+import type { MulterFile } from '../common/types/multer.types';
 
 type RegisterFiles = {
-  cedulaDocument?: Express.Multer.File | null;
-  workerPhoto?: Express.Multer.File | null;
+  cedulaDocument?: MulterFile | null;
+  workerPhoto?: MulterFile | null;
 };
 
 @Injectable()
@@ -138,7 +139,7 @@ export class AuthService {
 
   private async uploadWorkerFile(
     userId: string,
-    file: Express.Multer.File,
+    file: MulterFile,
     type: 'cedula' | 'foto',
   ): Promise<string> {
     const bucketName = 'worker-documents';

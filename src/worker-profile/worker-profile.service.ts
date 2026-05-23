@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { AddPortfolioItemDto } from './dto/add-portfolio-item.dto';
+import type { MulterFile } from '../common/types/multer.types';
 import {
   SetCoverageZonesDto,
   SetWorkerSkillsDto,
@@ -230,7 +231,7 @@ export class WorkerProfileService {
 
   async uploadPortfolioFile(
     workerId: string,
-    file: Express.Multer.File,
+    file: MulterFile,
     title?: string,
   ) {
     await this.getVerifiedWorkerProfile(workerId);
@@ -410,7 +411,7 @@ export class WorkerProfileService {
     };
   }
 
-  private validatePortfolioFile(file: Express.Multer.File) {
+  private validatePortfolioFile(file: MulterFile) {
     const allowedMimeTypes = [
       'image/jpeg',
       'image/png',
@@ -450,7 +451,7 @@ export class WorkerProfileService {
     }
   }
 
-  private getPortfolioFileType(file: Express.Multer.File): 'image' | 'video' {
+  private getPortfolioFileType(file: MulterFile): 'image' | 'video' {
     const fileName = file.originalname.toLowerCase();
 
     if (

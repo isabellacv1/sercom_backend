@@ -16,6 +16,7 @@ import type { JwtUser } from 'src/auth/decorators/current-user.decorator';
 import { UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import type { MulterFile } from '../common/types/multer.types';
 
 @Controller('profiles')
 export class ProfilesController {
@@ -34,7 +35,7 @@ export class ProfilesController {
   )
   async updatePhoto(
     @CurrentUser() user: JwtUser,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: MulterFile,
   ) {
     if (!file) {
       throw new BadRequestException('No se ha proporcionado ninguna imagen');
