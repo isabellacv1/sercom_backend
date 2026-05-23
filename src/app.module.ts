@@ -19,6 +19,7 @@ import { CertificationsModule } from './certifications/certifications.module';
 import { CertificationModulesModule } from './certification_modules/certification_modules.module';
 import { WorkerCertificationsModule } from './worker_certifications/worker_certifications.module';
 import { ReviewsModule } from './reviews/reviews.module';
+import { FavoritesModule } from './favorites/favorites.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { ReviewsModule } from './reviews/reviews.module';
     CertificationModulesModule,
     WorkerCertificationsModule,
     ReviewsModule,
+    FavoritesModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],
