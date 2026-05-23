@@ -4,7 +4,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "node ./node_modules/@nestjs/cli/bin/nest.js build",
+    "build": "nest build",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -17,6 +17,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@nestjs/cli": "^11.0.21",
     "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
@@ -41,7 +42,6 @@
     "websockets": "^0.2.0"
   },
   "devDependencies": {
-    "@nestjs/cli": "^11.0.21",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
     "@types/express": "^5.0.6",
