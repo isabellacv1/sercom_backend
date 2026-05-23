@@ -392,7 +392,7 @@ export class ProposalsService {
         provider: 'mercadopago',
         payment_method: 'mercadopago_link',
         provider_reference: null,
-        checkout_url: 'https://link.mercadopago.com.co/sercomi',
+        checkout_url: null,
         status: 'pending',
       } as any)
       .select()
@@ -416,7 +416,7 @@ export class ProposalsService {
         service_id: proposal.service_id,
         status: 'assigned',
         changed_by: clientId,
-        note: `Propuesta aceptada. Trabajador asignado: ${proposal.technician_id}. Pago pendiente por Wompi.`,
+        note: `Propuesta aceptada. Trabajador asignado: ${proposal.technician_id}. Pago pendiente por Mercado Pago.`,
       });
 
     if (historyResponse.error) {
@@ -432,7 +432,7 @@ export class ProposalsService {
       chatRoom: chatRoomResponse.data,
       service: updateServiceResponse.data,
       payment: paymentResponse.data,
-      checkout_url: 'https://link.mercadopago.com.co/sercomi',
+      checkout_url: null,
     };
   }
 

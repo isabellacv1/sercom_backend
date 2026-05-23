@@ -32,10 +32,6 @@ Este repositorio contiene la lógica de negocio, autenticación y gestión de mi
    ```
 
 2. Configurar variables de entorno:
-   ```bash
-    $ cp .env.example .env 
-   ```
-   Copia .env.example a .env.
    Agrega tus llaves de Supabase (URL y KEY).
 
 ## Ejecución

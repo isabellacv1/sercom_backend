@@ -28,4 +28,10 @@ export class SupabaseService {
   get sb(): SupabaseClient<Database> {
     return this.client;
   }
+
+  /** Cliente sin tipos estrictos — para tablas nuevas no incluidas en el schema generado */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  get sbRaw(): SupabaseClient<any> {
+    return this.client as SupabaseClient<any>;
+  }
 }

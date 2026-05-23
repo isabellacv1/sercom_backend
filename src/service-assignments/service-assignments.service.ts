@@ -9,7 +9,8 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceAssignmentDto } from './dto/create-service-assignment.dto';
 import { RespondServiceAssignmentDto } from './dto/respond-service-assignment.dto';
 
-const MERCADO_PAGO_CHECKOUT_URL = 'https://link.mercadopago.com.co/sercomi';
+// El checkout URL se genera dinámicamente en POST /payments/mercadopago/link
+const MERCADO_PAGO_CHECKOUT_URL: null = null;
 
 type ServiceRow = {
   id: string;

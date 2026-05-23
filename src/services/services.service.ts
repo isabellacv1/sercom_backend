@@ -280,8 +280,6 @@ export class ServicesService {
       );
     }
 
-    // Desactivamos la validación estricta de la tabla de pagos temporalmente para agilizar pruebas en Flutter
-    /*
     if (nextStatus === 'on_the_way' || nextStatus === 'in_progress') {
       const paymentResponse = await this.supabaseService.sb
         .from('payments')
@@ -291,28 +289,24 @@ export class ServicesService {
         .eq('worker_id', workerId)
         .maybeSingle();
 
-      const payment = paymentResponse.data;
-      const paymentError = paymentResponse.error;
-
-      if (paymentError) {
+      if (paymentResponse.error) {
         throw new InternalServerErrorException(
           'No se pudo validar el estado del pago',
         );
       }
 
-      if (!payment) {
+      if (!paymentResponse.data) {
         throw new BadRequestException(
           'El servicio no puede iniciar porque no existe un pago asociado',
         );
       }
 
-      if (payment.status !== 'held') {
+      if (paymentResponse.data.status !== 'held') {
         throw new BadRequestException(
           'El servicio no puede iniciar hasta que el pago esté garantizado por el cliente',
         );
       }
     }
-    */
 
     const updatePayload: ServiceUpdate = {
       status: nextStatus,

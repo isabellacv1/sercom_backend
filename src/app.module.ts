@@ -13,6 +13,7 @@ import { ProposalsModule } from './proposals/proposals.module';
 import { ChatModule } from './chat/chat.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 import { PaymentsModule } from './payments/payments.module';
+import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { CertificationsModule } from './certifications/certifications.module';
 import { CertificationModulesModule } from './certification_modules/certification_modules.module';
@@ -34,6 +35,7 @@ import { WorkerCertificationsModule } from './worker_certifications/worker_certi
     ChatModule,
     WorkerProfileModule,
     PaymentsModule,
+    PushNotificationsModule,
     ChatbotModule,
     CertificationsModule,
     CertificationModulesModule,
