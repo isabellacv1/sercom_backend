@@ -142,7 +142,7 @@ export class PaymentsService {
         preferenceResult = await workerPreferenceAPI.create({
           body: {
             external_reference: payment.id,
-            marketplace_fee: Number(payment.commission_amount),
+            // marketplace_fee: Number(payment.commission_amount),
             items: [
               {
                 id: service.id,
