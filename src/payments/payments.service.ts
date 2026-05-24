@@ -21,7 +21,13 @@ import { ConfirmMercadoPagoPaymentDto } from './dto/confirm-mercadopago-payment.
 import { ReleasePaymentDto } from './dto/release-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 
-type PaymentStatus = 'pending' | 'held' | 'released' | 'refunded' | 'failed' | 'disbursed';
+type PaymentStatus =
+  | 'pending'
+  | 'held'
+  | 'released'
+  | 'refunded'
+  | 'failed'
+  | 'disbursed';
 
 @Injectable()
 export class PaymentsService {
@@ -96,12 +102,27 @@ export class PaymentsService {
 
     const { data: clientProfile } = await this.db
       .from('profiles')
-      .select('full_name')
+      .select('full_name, email')
       .eq('id', clientId)
       .maybeSingle();
 
+    this.logger.log(
+      JSON.stringify(
+        {
+          payer: {
+            name: clientProfile?.full_name,
+            email: clientProfile?.email,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
     // Verificar si el trabajador tiene OAuth conectado para usar Marketplace Split
-    const workerAccount = await this.mpOAuthService.getWorkerAccount(service.assigned_worker_id);
+    const workerAccount = await this.mpOAuthService.getWorkerAccount(
+      service.assigned_worker_id,
+    );
     const useMarketplaceSplit = !!workerAccount;
 
     let preferenceResult: any;
@@ -113,7 +134,9 @@ export class PaymentsService {
         //   worker recibe: amount_total - commission_amount
         //   SerCom recibe: commission_amount (marketplace_fee)
         // Requiere que la app esté registrada como Marketplace en MP.
-        const workerMpClient = new MercadoPagoConfig({ accessToken: workerAccount.mp_access_token });
+        const workerMpClient = new MercadoPagoConfig({
+          accessToken: workerAccount.mp_access_token,
+        });
         const workerPreferenceAPI = new Preference(workerMpClient);
 
         preferenceResult = await workerPreferenceAPI.create({
@@ -130,7 +153,10 @@ export class PaymentsService {
                 currency_id: 'COP',
               },
             ],
-            payer: { name: clientProfile?.full_name ?? '' },
+            payer: {
+              name: clientProfile?.full_name ?? '',
+              email: clientProfile?.email ?? '',
+            },
             notification_url: `${this.appUrl}/payments/webhook/mercadopago`,
             back_urls: {
               success: `${this.frontendUrl}/payment/success`,
@@ -141,7 +167,9 @@ export class PaymentsService {
             statement_descriptor: 'SerCom',
             expires: true,
             expiration_date_from: new Date().toISOString(),
-            expiration_date_to: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+            expiration_date_to: new Date(
+              Date.now() + 48 * 60 * 60 * 1000,
+            ).toISOString(),
           },
         });
 
@@ -175,12 +203,16 @@ export class PaymentsService {
             statement_descriptor: 'SerCom',
             expires: true,
             expiration_date_from: new Date().toISOString(),
-            expiration_date_to: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+            expiration_date_to: new Date(
+              Date.now() + 48 * 60 * 60 * 1000,
+            ).toISOString(),
           },
         });
       }
     } catch (err) {
-      this.logger.error(`Error creando preference MP: ${(err as Error).message}`);
+      this.logger.error(
+        `Error creando preference MP: ${(err as Error).message}`,
+      );
       throw new InternalServerErrorException(
         'No se pudo generar el link de pago. Intenta nuevamente.',
       );
@@ -202,7 +234,8 @@ export class PaymentsService {
       .select()
       .single();
 
-    if (updateError) throw new InternalServerErrorException(updateError.message);
+    if (updateError)
+      throw new InternalServerErrorException(updateError.message);
 
     await this.logAudit({
       payment_id: payment.id,
@@ -313,7 +346,9 @@ export class PaymentsService {
 
     const status = payment.status as PaymentStatus;
     if (status === 'held') {
-      throw new BadRequestException('Este pago ya fue confirmado anteriormente');
+      throw new BadRequestException(
+        'Este pago ya fue confirmado anteriormente',
+      );
     }
     if (status === 'failed') {
       throw new BadRequestException(
@@ -348,7 +383,10 @@ export class PaymentsService {
         metadata: { provider_reference: dto.provider_reference },
       });
 
-      return { message: 'Pago rechazado. El servicio no puede iniciar.', payment: failed };
+      return {
+        message: 'Pago rechazado. El servicio no puede iniciar.',
+        payment: failed,
+      };
     }
 
     const receiptNumber = `MP-${paymentId}`;
@@ -473,7 +511,9 @@ export class PaymentsService {
     dto: ReleasePaymentDto,
   ) {
     if (!(await this.isAdmin(userId))) {
-      throw new ForbiddenException('Solo un administrador puede liberar fondos');
+      throw new ForbiddenException(
+        'Solo un administrador puede liberar fondos',
+      );
     }
 
     const { data: payment, error } = await this.db
@@ -525,7 +565,8 @@ export class PaymentsService {
       new_status: 'released',
       source: 'admin',
       changed_by: userId,
-      note: dto.note ?? 'Fondos liberados al técnico tras completar el servicio',
+      note:
+        dto.note ?? 'Fondos liberados al técnico tras completar el servicio',
     });
 
     if (released.worker_id) {
@@ -775,12 +816,14 @@ export class PaymentsService {
   async getWorkerWallet(workerId: string) {
     const { data: payments, error } = await this.db
       .from('payments')
-      .select(`
+      .select(
+        `
         id, service_id, status, payout_status, payment_mode,
         worker_amount, commission_amount, amount_total, currency,
         created_at, paid_at, disbursed_at, external_transfer_id,
         services:service_id(title, scheduled_at, address)
-      `)
+      `,
+      )
       .eq('worker_id', workerId)
       .order('created_at', { ascending: false });
 
@@ -797,7 +840,9 @@ export class PaymentsService {
       .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
 
     const paidOutTotal = rows
-      .filter((p) => p.status === 'disbursed' && p.payout_status === 'completed')
+      .filter(
+        (p) => p.status === 'disbursed' && p.payout_status === 'completed',
+      )
       .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
 
     const pendingManualTotal = rows
@@ -823,7 +868,8 @@ export class PaymentsService {
       disbursed_at: p.disbursed_at,
     }));
 
-    const mpConnected = !!(await this.mpOAuthService.getWorkerAccount(workerId));
+    const mpConnected =
+      !!(await this.mpOAuthService.getWorkerAccount(workerId));
 
     return {
       available_balance: availableBalance,
@@ -873,35 +919,50 @@ export class PaymentsService {
       .maybeSingle();
 
     if (error) {
-      this.logger.error(`Error buscando pago held para servicio ${serviceId}: ${error.message}`);
+      this.logger.error(
+        `Error buscando pago held para servicio ${serviceId}: ${error.message}`,
+      );
       return;
     }
     if (!payment) {
-      this.logger.warn(`No se encontró pago en estado 'held' para servicio ${serviceId}`);
+      this.logger.warn(
+        `No se encontró pago en estado 'held' para servicio ${serviceId}`,
+      );
       return;
     }
 
     // Idempotencia: ya fue procesado
-    if (payment.payout_status === 'completed' || payment.status === 'disbursed') {
+    if (
+      payment.payout_status === 'completed' ||
+      payment.status === 'disbursed'
+    ) {
       return;
     }
 
     // Si fue un pago marketplace, el trabajador ya recibió su dinero al momento del pago.
     // Solo actualizamos el estado interno.
     if (payment.payment_mode === 'marketplace') {
-      const result = this.payoutService.marketplaceSplitAlreadyExecuted(payment.id);
+      const result = this.payoutService.marketplaceSplitAlreadyExecuted(
+        payment.id,
+      );
       const now = new Date().toISOString();
-      await this.db.from('payments').update({
-        status: 'disbursed',
-        payout_status: 'completed',
-        disbursed_at: now,
-        payout_attempts: 1,
-        updated_at: now,
-      }).eq('id', payment.id);
+      await this.db
+        .from('payments')
+        .update({
+          status: 'disbursed',
+          payout_status: 'completed',
+          disbursed_at: now,
+          payout_attempts: 1,
+          updated_at: now,
+        })
+        .eq('id', payment.id);
 
       await this.logAudit({
-        payment_id: payment.id, previous_status: 'held', new_status: 'disbursed',
-        source: 'system', note: 'Marketplace split: el trabajador recibió su pago automáticamente.',
+        payment_id: payment.id,
+        previous_status: 'held',
+        new_status: 'disbursed',
+        source: 'system',
+        note: 'Marketplace split: el trabajador recibió su pago automáticamente.',
         metadata: { method: result.method },
       });
       if (payment.worker_id) {
@@ -915,7 +976,9 @@ export class PaymentsService {
     }
 
     // Flujo estándar: plataforma transfiere al trabajador
-    const workerAccount = await this.mpOAuthService.getWorkerAccount(payment.worker_id);
+    const workerAccount = await this.mpOAuthService.getWorkerAccount(
+      payment.worker_id,
+    );
 
     const result = await this.payoutService.transferToWorker({
       referenceId: payment.id,
@@ -960,7 +1023,9 @@ export class PaymentsService {
     });
 
     if (payment.worker_id) {
-      const workerAmount = Number(payment.worker_amount).toLocaleString('es-CO');
+      const workerAmount = Number(payment.worker_amount).toLocaleString(
+        'es-CO',
+      );
       await this.pushService.sendToUser(payment.worker_id, {
         title: result.success ? '¡Pago recibido!' : 'Pago en proceso',
         body: result.success
