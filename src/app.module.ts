@@ -20,6 +20,7 @@ import { CertificationModulesModule } from './certification_modules/certificatio
 import { WorkerCertificationsModule } from './worker_certifications/worker_certifications.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { FavoritesModule } from './favorites/favorites.module';
+import { MpOAuthModule } from './oauth/mp-oauth.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { FavoritesModule } from './favorites/favorites.module';
     WorkerCertificationsModule,
     ReviewsModule,
     FavoritesModule,
+    MpOAuthModule,
   ],
   providers: [ServiceOptionsService],
   controllers: [ServiceOptionsController],

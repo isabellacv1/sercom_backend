@@ -57,6 +57,18 @@ export class PaymentsController {
     return this.paymentsService.createCheckoutPreference(user.sub, dto);
   }
 
+  // ─── Wallet y balance del trabajador ─────────────────────────────────────
+
+  @Get('worker/wallet')
+  getWorkerWallet(@CurrentUser() user: JwtUser) {
+    return this.paymentsService.getWorkerWallet(user.sub);
+  }
+
+  @Get('worker/balance')
+  getWorkerBalance(@CurrentUser() user: JwtUser) {
+    return this.paymentsService.getWorkerBalance(user.sub);
+  }
+
   // ─── Consultar pagos ──────────────────────────────────────────────────────
 
   @Get('service/:serviceId')

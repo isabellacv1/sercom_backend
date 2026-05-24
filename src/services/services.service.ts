@@ -3,9 +3,11 @@ import {
   Injectable,
   ForbiddenException,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
+import { PaymentsService } from '../payments/payments.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
@@ -17,7 +19,12 @@ export type ServiceStatus = Database['public']['Enums']['service_status'];
 
 @Injectable()
 export class ServicesService {
-  constructor(private readonly supabaseService: SupabaseService) {}
+  private readonly logger = new Logger(ServicesService.name);
+
+  constructor(
+    private readonly supabaseService: SupabaseService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   async createPreRequest(clientId: string, dto: CreatePreServiceRequestDto) {
     const categoryResponse = await this.supabaseService.sb
@@ -453,6 +460,16 @@ export class ServicesService {
       throw new InternalServerErrorException(
         'No se pudo registrar la confirmación del servicio',
       );
+    }
+
+    // Si ambas partes confirmaron, disparar el payout automático al trabajador.
+    // Se lanza sin await para no bloquear la respuesta al usuario.
+    if (updatedService.client_confirmation && updatedService.worker_confirmation) {
+      this.paymentsService
+        .disburseWorkerPayment(serviceId)
+        .catch((err: Error) =>
+          this.logger.error(`Auto-payout falló para servicio ${serviceId}: ${err.message}`),
+        );
     }
 
     return {
