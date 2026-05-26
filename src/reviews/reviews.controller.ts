@@ -1,25 +1,51 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { ReviewsService } from './reviews.service';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+} from '@nestjs/common';
 import { Auth } from '../auth/decorators/auth.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { JwtUser } from '../auth/decorators/current-user.decorator';
-import { CreateClientReviewDto } from './dto/create-client-review.dto';
+import {
+  CurrentUser,
+  JwtUser,
+} from '../auth/decorators/current-user.decorator';
+import { AppRoles } from '../auth/interfaces/app-roles';
+import { CreateReviewDto } from './dto/create-review.dto';
+import { ReviewsService } from './reviews.service';
 
-@Controller('reviews')
+@Controller()
 export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
-  @Auth()
-  @Post('client')
-  async createClientReview(
-    @CurrentUser() user: JwtUser,
-    @Body() dto: CreateClientReviewDto,
-  ) {
-    return this.reviewsService.createClientReview(user.sub, dto);
+  @Auth(AppRoles.CLIENT)
+  @Post('reviews')
+  create(@CurrentUser() user: JwtUser, @Body() dto: CreateReviewDto) {
+    return this.reviewsService.create(user.sub, dto);
   }
 
-  @Get('profile/:profileId')
-  async getProfileReviews(@Param('profileId') profileId: string) {
-    return this.reviewsService.getProfileReviews(profileId);
+  @Auth()
+  @Get('services/:serviceId/review')
+  findByService(
+    @CurrentUser() user: JwtUser,
+    @Param('serviceId', ParseUUIDPipe) serviceId: string,
+  ) {
+    return this.reviewsService.findByServiceForUser(user.sub, serviceId);
+  }
+
+  @Auth(AppRoles.WORKER)
+  @Get('worker-profile/me/reviews')
+  findMine(@CurrentUser() user: JwtUser) {
+    return this.reviewsService.findByWorker(user.sub, user.sub);
+  }
+
+  @Auth()
+  @Get('workers/:workerId/reviews')
+  findByWorker(
+    @CurrentUser() user: JwtUser,
+    @Param('workerId', ParseUUIDPipe) workerId: string,
+  ) {
+    return this.reviewsService.findByWorker(workerId, user.sub);
   }
 }
