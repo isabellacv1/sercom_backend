@@ -569,13 +569,17 @@ export class PaymentsService {
         dto.note ?? 'Fondos liberados al técnico tras completar el servicio',
     });
 
-    if (released.worker_id) {
-      await this.pushService.sendToUser(released.worker_id, {
-        title: 'Pago liberado',
-        body: `Se liberaron $${Number(released.worker_amount).toLocaleString('es-CO')} COP a tu cuenta.`,
-        data: { payment_id: paymentId, type: 'payment_released' },
-      });
-    }
+    const svc = await this.getServiceBasicData(released.service_id);
+
+    // HU26: notificación al trabajador (monto + servicio)
+    await this.notifyWorkerPaymentDeposited({
+      workerId: released.worker_id,
+      paymentId,
+      serviceId: released.service_id,
+      workerAmount: Number(released.worker_amount),
+      dataType: 'payment_released',
+      serviceTitle: svc?.title ?? null,
+    });
 
     if (released.client_id) {
       await this.pushService.sendToUser(released.client_id, {
@@ -584,8 +588,6 @@ export class PaymentsService {
         data: { payment_id: paymentId, type: 'payment_released' },
       });
     }
-
-    const svc = await this.getServiceBasicData(released.service_id);
     return {
       message: 'Fondos liberados al técnico correctamente.',
       payment: released,
@@ -931,6 +933,9 @@ export class PaymentsService {
       return;
     }
 
+    const serviceRow = await this.getServiceBasicData(serviceId);
+    const serviceTitle = serviceRow?.title ?? null;
+
     // Idempotencia: ya fue procesado
     if (
       payment.payout_status === 'completed' ||
@@ -965,13 +970,14 @@ export class PaymentsService {
         note: 'Marketplace split: el trabajador recibió su pago automáticamente.',
         metadata: { method: result.method },
       });
-      if (payment.worker_id) {
-        await this.pushService.sendToUser(payment.worker_id, {
-          title: '¡Misión completada!',
-          body: `Tu pago de $${Number(payment.worker_amount).toLocaleString('es-CO')} COP ya está en tu cuenta Mercado Pago.`,
-          data: { payment_id: payment.id, type: 'payment_disbursed' },
-        });
-      }
+      await this.notifyWorkerPaymentDeposited({
+        workerId: payment.worker_id,
+        paymentId: payment.id,
+        serviceId,
+        workerAmount: Number(payment.worker_amount),
+        dataType: 'payment_disbursed',
+        serviceTitle,
+      });
       return;
     }
 
@@ -1022,17 +1028,36 @@ export class PaymentsService {
       metadata: { payout_result: result },
     });
 
+    const disbursed = updatePayload.status === 'disbursed';
+
     if (payment.worker_id) {
-      const workerAmount = Number(payment.worker_amount).toLocaleString(
-        'es-CO',
-      );
-      await this.pushService.sendToUser(payment.worker_id, {
-        title: result.success ? '¡Pago recibido!' : 'Pago en proceso',
-        body: result.success
-          ? `Se transfirieron $${workerAmount} COP a tu cuenta.`
-          : `Tu pago de $${workerAmount} COP está siendo procesado.`,
-        data: { payment_id: payment.id, type: 'payment_disbursed' },
-      });
+      if (disbursed) {
+        // HU26: mismo criterio que marca el pago como disponible (incl. pending_manual)
+        await this.notifyWorkerPaymentDeposited({
+          workerId: payment.worker_id,
+          paymentId: payment.id,
+          serviceId,
+          workerAmount: Number(payment.worker_amount),
+          dataType: 'payment_disbursed',
+          serviceTitle,
+        });
+      } else {
+        const amountStr = `$${Number(payment.worker_amount).toLocaleString('es-CO')} COP`;
+        const label =
+          serviceTitle?.trim() ||
+          (await this.getServiceBasicData(serviceId))?.title?.trim() ||
+          'Tu servicio';
+        await this.pushService.sendToUser(payment.worker_id, {
+          title: 'Pago en proceso',
+          body: `Tu pago de ${amountStr} por «${label}» no pudo transferirse automáticamente. Si persiste, contacta soporte.`,
+          data: {
+            type: 'payment_disburse_failed',
+            payment_id: String(payment.id),
+            service_id: String(serviceId),
+            service_title: label.slice(0, 120),
+          },
+        });
+      }
     }
 
     if (payment.client_id) {
@@ -1123,6 +1148,42 @@ export class PaymentsService {
       instructions:
         'Después de pagar, el dinero quedará retenido por la plataforma. El técnico recibirá una notificación para iniciar el servicio.',
     };
+  }
+
+  /**
+   * HU26 — Notificación al trabajador cuando el pago queda depositado / liberado:
+   * incluye monto y nombre del servicio (push + data para deep link).
+   */
+  private async notifyWorkerPaymentDeposited(params: {
+    workerId: string | null | undefined;
+    paymentId: string;
+    serviceId: string;
+    workerAmount: number;
+    dataType: 'payment_released' | 'payment_disbursed';
+    serviceTitle?: string | null;
+  }): Promise<void> {
+    if (!params.workerId) return;
+
+    let title =
+      params.serviceTitle?.trim() ||
+      (await this.getServiceBasicData(params.serviceId))?.title?.trim() ||
+      'Tu servicio';
+    if (title.length > 120) {
+      title = `${title.slice(0, 117)}…`;
+    }
+
+    const amountStr = `$${Number(params.workerAmount).toLocaleString('es-CO')} COP`;
+
+    await this.pushService.sendToUser(params.workerId, {
+      title: 'Pago depositado',
+      body: `Recibiste ${amountStr} por el servicio «${title}». El dinero ya está disponible en tu cuenta.`,
+      data: {
+        type: params.dataType,
+        payment_id: String(params.paymentId),
+        service_id: String(params.serviceId),
+        service_title: title,
+      },
+    });
   }
 
   private async notifyWorkerPaymentGuaranteed(workerId: string | null) {
