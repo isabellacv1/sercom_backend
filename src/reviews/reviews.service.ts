@@ -72,7 +72,7 @@ export class ReviewsService {
         )
       `)
       .or(`client_id.eq.${profileId},worker_id.eq.${profileId}`)
-      .neq('reviewer_id' as any, profileId)
+      // .neq('reviewer_id' as any, profileId) // COMENTADO TEMPORALMENTE PARA PRUEBAS LOCALES (Mock data tiene el mismo ID)
       .order('created_at', { ascending: false });
 
     if (error) {

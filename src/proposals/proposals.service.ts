@@ -584,6 +584,12 @@ export class ProposalsService {
           budget_min,
           budget_max,
           created_at,
+          client_id,
+          profiles:client_id (
+            full_name,
+            profile_image_url,
+            rating_avg
+          ),
           service_categories:category_id (
             id,
             name
@@ -609,6 +615,7 @@ export class ProposalsService {
     return proposals.map((p) => {
       const service = p.services ?? {};
       const category = service.service_categories ?? {};
+      const client = service.profiles ?? {};
 
       const statusLabelMap: Record<string, string> = {
         pending: 'Tu postulación está en revisión',
@@ -652,6 +659,11 @@ export class ProposalsService {
         status: service.status ?? null,
         price_min: service.budget_min ?? null,
         price_max: service.budget_max ?? null,
+
+        client_id: service.client_id ?? null,
+        client_name: client.full_name ?? null,
+        client_photo_url: client.profile_image_url ?? null,
+        client_rating_avg: client.rating_avg ?? null,
 
         category_name: category.name ?? null,
       };
