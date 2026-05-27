@@ -956,6 +956,123 @@ export class ServicesService {
     return labels[serviceStatus] || serviceStatus;
   }
 
+  async cancelMission(
+    clientId: string,
+    serviceId: string,
+  ): Promise<{ service: any; penaltyApplied: boolean; message: string }> {
+    const { data: service, error: svcErr } = await this.supabaseService.sb
+      .from('services')
+      .select('*')
+      .eq('id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (svcErr) throw new InternalServerErrorException(svcErr.message);
+    if (!service) throw new NotFoundException('Misión no encontrada');
+
+    const nonCancellable: ServiceStatus[] = ['cancelled', 'on_the_way', 'in_progress', 'completed'];
+    if (nonCancellable.includes(service.status)) {
+      throw new BadRequestException(
+        `No se puede cancelar una misión en estado "${this.getStatusLabel(service.status)}"`,
+      );
+    }
+
+    const now = new Date();
+    const scheduledAt = service.scheduled_at ? new Date(service.scheduled_at) : null;
+    const msUntil = scheduledAt ? scheduledAt.getTime() - now.getTime() : Infinity;
+    const hoursUntil = msUntil / (1000 * 60 * 60);
+    const penaltyApplied = hoursUntil >= 0 && hoursUntil < 1;
+
+    // Marcar pago como reembolsado si existe en estado held o pending
+    const { data: payment } = await this.supabaseService.sb
+      .from('payments')
+      .select('id, status')
+      .eq('service_id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (payment && (payment.status === 'held' || payment.status === 'pending')) {
+      await this.supabaseService.sb
+        .from('payments')
+        .update({ status: 'refunded', updated_at: new Date().toISOString() })
+        .eq('id', payment.id);
+    }
+
+    const { data: updated, error: updateErr } = await this.supabaseService.sb
+      .from('services')
+      .update({ status: 'cancelled' })
+      .eq('id', serviceId)
+      .select(`*, category:service_categories(id, name, description, icon)`)
+      .single();
+
+    if (updateErr) throw new InternalServerErrorException(updateErr.message);
+
+    await this.supabaseService.sb.from('service_status_history').insert({
+      service_id: serviceId,
+      status: 'cancelled',
+      changed_by: clientId,
+      note: penaltyApplied
+        ? 'Cancelado por el cliente con menos de 1 hora de anticipación. Se aplica sanción.'
+        : 'Cancelado por el cliente.',
+    });
+
+    return {
+      service: updated,
+      penaltyApplied,
+      message: penaltyApplied
+        ? 'Misión cancelada. Se aplicará una sanción por cancelación tardía.'
+        : 'Misión cancelada exitosamente.',
+    };
+  }
+
+  async forcePaidForTesting(clientId: string, serviceId: string) {
+    const { data: service, error: svcErr } = await this.supabaseService.sb
+      .from('services')
+      .select('*')
+      .eq('id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (svcErr) throw new InternalServerErrorException(svcErr.message);
+    if (!service) throw new NotFoundException('Misión no encontrada');
+
+    const blocked: ServiceStatus[] = ['cancelled', 'in_progress', 'completed', 'on_the_way'];
+    if (blocked.includes(service.status)) {
+      throw new BadRequestException('No se puede forzar pago en el estado actual de la misión');
+    }
+
+    const { data: existing } = await this.supabaseService.sb
+      .from('payments')
+      .select('id, status')
+      .eq('service_id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+
+    if (existing) {
+      await this.supabaseService.sb
+        .from('payments')
+        .update({ status: 'held', updated_at: new Date().toISOString() })
+        .eq('id', existing.id);
+    } else {
+      const amountTotal = service.budget_min ?? 100000;
+      const commissionAmount = Math.round(amountTotal * 0.1);
+      await this.supabaseService.sb.from('payments').insert({
+        service_id: serviceId,
+        client_id: clientId,
+        worker_id: service.assigned_worker_id ?? null,
+        amount_total: amountTotal,
+        commission_amount: commissionAmount,
+        worker_amount: amountTotal - commissionAmount,
+        currency: 'COP',
+        provider: 'test',
+        payment_method: 'test_forced',
+        status: 'held',
+      } as any);
+    }
+
+    return { message: 'Pago forzado a estado "held" para pruebas.' };
+  }
+
   private getRelativeTime(date: Date): string {
     const now = new Date();
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
