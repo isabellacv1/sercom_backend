@@ -339,12 +339,17 @@ async enroll(workerId: string, certificationId: string) {
   console.log(enrollment);
 
   if (insertError) {
-    console.log(insertError);
+  console.error('ERROR INSERTANDO INSCRIPCIÓN');
+  console.error(JSON.stringify(insertError, null, 2));
 
-    throw new InternalServerErrorException(
-      'Error al realizar la inscripción',
-    );
-  }
+  throw new InternalServerErrorException({
+    message: 'Error al realizar la inscripción',
+    error: insertError.message,
+    details: insertError.details,
+    hint: insertError.hint,
+    code: insertError.code,
+  });
+}
 
   return {
     message: 'Inscripción realizada correctamente',
