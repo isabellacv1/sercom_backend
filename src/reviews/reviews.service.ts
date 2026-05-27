@@ -1,64 +1,233 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
-import { CreateClientReviewDto } from './dto/create-client-review.dto';
+import { CreateReviewDto } from './dto/create-review.dto';
 
 @Injectable()
 export class ReviewsService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
-  async createClientReview(reviewerId: string, dto: CreateClientReviewDto) {
-    // 1. Fetch the service to validate status and assigned worker
-    const { data: service, error: serviceError } = await this.supabaseService.client
+  async create(clientId: string, dto: CreateReviewDto) {
+    const serviceResponse = await this.supabaseService.client
       .from('services')
-      .select('status, assigned_worker_id, client_id')
+      .select('id, status, client_id, assigned_worker_id')
       .eq('id', dto.service_id)
       .maybeSingle();
 
-    if (serviceError) {
-      throw new InternalServerErrorException('Error al consultar el servicio');
+    if (serviceResponse.error) {
+      throw new InternalServerErrorException(serviceResponse.error.message);
     }
 
+    const service = serviceResponse.data;
     if (!service) {
-      throw new BadRequestException('El servicio no existe');
+      throw new NotFoundException('Servicio no encontrado');
     }
 
-    // 2. Validate business rules
+    if (service.client_id !== clientId) {
+      throw new ForbiddenException(
+        'Solo el cliente del servicio puede calificarlo',
+      );
+    }
+
     if (service.status !== 'completed') {
-      throw new BadRequestException('El servicio debe estar completado para poder calificar al cliente');
+      throw new BadRequestException(
+        'Solo puedes calificar un servicio marcado como completado',
+      );
     }
 
-    if (service.assigned_worker_id !== reviewerId) {
-      throw new ForbiddenException('Solo el trabajador asignado puede calificar este servicio');
+    if (!service.assigned_worker_id) {
+      throw new BadRequestException(
+        'El servicio no tiene un trabajador asignado para calificar',
+      );
     }
 
-    // 3. Insert review
-    const { data: review, error: reviewError } = await this.supabaseService.client
+    const existingReview = await this.supabaseService.client
+      .from('reviews')
+      .select('id')
+      .eq('service_id', dto.service_id)
+      .maybeSingle();
+
+    if (existingReview.error) {
+      throw new InternalServerErrorException(existingReview.error.message);
+    }
+
+    if (existingReview.data) {
+      throw new ConflictException('Este servicio ya fue calificado');
+    }
+
+    const insertResponse = await this.supabaseService.client
       .from('reviews')
       .insert({
         service_id: dto.service_id,
-        reviewer_id: reviewerId,
+        client_id: clientId,
         worker_id: service.assigned_worker_id,
-        client_id: service.client_id,
         rating: dto.rating,
-        comment: dto.comment || null,
-      } as any)
-      .select('*')
+        comment: dto.comment?.trim() || null,
+      })
+      .select(
+        'id, service_id, client_id, worker_id, rating, comment, created_at',
+      )
       .single();
 
-    if (reviewError) {
-      // Handle potential unique constraint violation
-      if (reviewError.code === '23505') {
-        throw new BadRequestException('Ya has calificado a este cliente para este servicio');
-      }
-      throw new InternalServerErrorException(`Error al guardar la calificación: ${reviewError.message}`);
+    if (insertResponse.error) {
+      throw new InternalServerErrorException(insertResponse.error.message);
     }
 
-    return review;
+    await this.refreshWorkerRatingAggregates(service.assigned_worker_id);
+
+    return {
+      message: 'Calificación registrada exitosamente',
+      review: insertResponse.data,
+    };
+  }
+
+  async findByServiceForUser(userId: string, serviceId: string) {
+    const serviceResponse = await this.supabaseService.client
+      .from('services')
+      .select('id, client_id, assigned_worker_id, status')
+      .eq('id', serviceId)
+      .maybeSingle();
+
+    if (serviceResponse.error) {
+      throw new InternalServerErrorException(serviceResponse.error.message);
+    }
+
+    const service = serviceResponse.data;
+    if (!service) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
+
+    const isParticipant =
+      service.client_id === userId ||
+      service.assigned_worker_id === userId;
+
+    if (!isParticipant) {
+      throw new ForbiddenException('No tienes acceso a este servicio');
+    }
+
+    const reviewResponse = await this.supabaseService.client
+      .from('reviews')
+      .select(
+        'id, service_id, client_id, worker_id, rating, comment, created_at',
+      )
+      .eq('service_id', serviceId)
+      .maybeSingle();
+
+    if (reviewResponse.error) {
+      throw new InternalServerErrorException(reviewResponse.error.message);
+    }
+
+    const canReview =
+      service.client_id === userId &&
+      service.status === 'completed' &&
+      !!service.assigned_worker_id &&
+      !reviewResponse.data;
+
+    return {
+      review: reviewResponse.data,
+      can_review: canReview,
+    };
+  }
+
+  async findByWorker(workerId: string, requesterId?: string) {
+    const isOwner = requesterId === workerId;
+
+    if (requesterId && !isOwner) {
+      const profileResponse = await this.supabaseService.client
+        .from('profiles')
+        .select('id, is_published')
+        .eq('id', workerId)
+        .maybeSingle();
+
+      if (profileResponse.error) {
+        throw new InternalServerErrorException(profileResponse.error.message);
+      }
+
+      if (!profileResponse.data?.is_published) {
+        throw new ForbiddenException(
+          'No tienes permiso para ver las calificaciones de este trabajador',
+        );
+      }
+    }
+
+    const reviewsResponse = await this.supabaseService.client
+      .from('reviews')
+      .select(
+        `
+        id,
+        service_id,
+        rating,
+        comment,
+        created_at,
+        client:profiles!reviews_client_id_fkey (
+          id,
+          full_name,
+          profile_image_url
+        ),
+        service:services!reviews_service_id_fkey (
+          id,
+          title
+        )
+      `,
+      )
+      .eq('worker_id', workerId)
+      .order('created_at', { ascending: false });
+
+    if (reviewsResponse.error) {
+      throw new InternalServerErrorException(reviewsResponse.error.message);
+    }
+
+    const profileResponse = await this.supabaseService.client
+      .from('profiles')
+      .select('rating_avg, rating_count')
+      .eq('id', workerId)
+      .maybeSingle();
+
+    if (profileResponse.error) {
+      throw new InternalServerErrorException(profileResponse.error.message);
+    }
+
+    return {
+      rating_avg: Number(profileResponse.data?.rating_avg ?? 0),
+      rating_count: Number(profileResponse.data?.rating_count ?? 0),
+      reviews: reviewsResponse.data ?? [],
+    };
+  }
+
+  private async refreshWorkerRatingAggregates(workerId: string) {
+    const statsResponse = await this.supabaseService.client
+      .from('reviews')
+      .select('rating')
+      .eq('worker_id', workerId);
+
+    if (statsResponse.error) {
+      throw new InternalServerErrorException(statsResponse.error.message);
+    }
+
+    const ratings = statsResponse.data ?? [];
+    const count = ratings.length;
+    const avg =
+      count === 0
+        ? 0
+        : ratings.reduce((sum, row) => sum + Number(row.rating), 0) / count;
+
+    const updateResponse = await this.supabaseService.client
+      .from('profiles')
+      .update({
+        rating_avg: Math.round(avg * 100) / 100,
+        rating_count: count,
+      })
+      .eq('id', workerId);
+
+    if (updateResponse.error) {
+      throw new InternalServerErrorException(updateResponse.error.message);
+    }
   }
 
   async getProfileReviews(profileId: string) {
@@ -72,15 +241,13 @@ export class ReviewsService {
         )
       `)
       .or(`client_id.eq.${profileId},worker_id.eq.${profileId}`)
-      // .neq('reviewer_id' as any, profileId) // COMENTADO TEMPORALMENTE PARA PRUEBAS LOCALES (Mock data tiene el mismo ID)
       .order('created_at', { ascending: false });
 
     if (error) {
       throw new InternalServerErrorException(
-        `Error al obtener las calificaciones del perfil: ${error.message}`,
+        `Error al obtener las calificaciones del perfil: ${error.message}`
       );
     }
-
-    return reviews || [];
+    return reviews;
   }
 }
