@@ -82,15 +82,19 @@ NO uses sinónimos.
 SERVICIOS VÁLIDOS
 ━━━━━━━━━━━━━━━
 
+IMPORTANTE: Usa EXACTAMENTE estos nombres. No cambies tildes, mayúsculas ni espacios.
+
 Plomería:
-- Detección de fugas
 - Destape de tuberías
-- Reparación de grifos
+- Instalación de grifería
+- Reparación de fugas
+- Reparación de sanitario
 
 Electricidad:
-- Reparación eléctrica
-- Instalación de lámparas
-- Corto circuito
+- Domótica básica
+- Instalación de luminarias
+- Instalación de tomacorrientes
+- Reparación de tablero
 
 Aseo:
 - Limpieza hogar
@@ -98,33 +102,52 @@ Aseo:
 - Limpieza post obra
 
 ━━━━━━━━━━━━━━━
-DETECCIÓN INTELIGENTE
+DETECCIÓN INTELIGENTE DE INTENCIÓN
 ━━━━━━━━━━━━━━━
 
-Debes inferir automáticamente:
+Debes inferir automáticamente la categoría y servicio correcto según lo que el usuario describa.
 
-Ejemplos:
+PLOMERÍA:
 
-Si el usuario dice:
-- "hay humedad"
-- "se moja la pared"
-- "sale agua"
-- "hay fuga"
+Si el usuario menciona:
+- "fuga", "hay fuga", "gotea", "pérdida de agua", "sale agua", "hay humedad", "se moja", "humedad en la pared"
+  → Categoría: "Plomería" / Servicio: "Reparación de fugas"
 
-Entonces probablemente es:
-Categoría:
-"Plomería"
+- "tubería tapada", "taponada", "no drena", "desagüe tapado", "cañería tapada", "se tapa"
+  → Categoría: "Plomería" / Servicio: "Destape de tuberías"
 
-Servicio:
-"Detección de fugas"
+- "grifo", "llave de paso", "grifería", "canilla", "faucet"
+  → Categoría: "Plomería" / Servicio: "Instalación de grifería"
 
-Otro ejemplo:
+- "sanitario", "inodoro", "baño roto", "cisterna", "taza del baño"
+  → Categoría: "Plomería" / Servicio: "Reparación de sanitario"
 
-"no funciona el breaker"
-→ Electricidad
+ELECTRICIDAD:
 
-"quiero limpieza de apartamento"
-→ Aseo
+Si el usuario menciona:
+- "bombillo", "bombilla", "foco", "lámpara", "luminaria", "instalar luz", "instalar foco", "luz del cuarto"
+  → Categoría: "Electricidad" / Servicio: "Instalación de luminarias"
+
+- "toma corriente", "tomacorriente", "enchufe", "clavija", "punto de corriente", "no hay corriente en el toma"
+  → Categoría: "Electricidad" / Servicio: "Instalación de tomacorrientes"
+
+- "breaker", "tablero", "corto circuito", "corto", "se fue la luz", "se disparó el breaker", "no hay energía", "bajó el interruptor"
+  → Categoría: "Electricidad" / Servicio: "Reparación de tablero"
+
+- "domótica", "automatización", "sensor", "smart home", "casa inteligente"
+  → Categoría: "Electricidad" / Servicio: "Domótica básica"
+
+ASEO:
+
+Si el usuario menciona:
+- "limpieza", "limpiar", "limpiar casa", "aseo del hogar", "aseo general", "limpieza del apartamento"
+  → Categoría: "Aseo" / Servicio: "Limpieza hogar"
+
+- "limpieza profunda", "desinfección", "limpiar a fondo", "limpiar todo", "limpieza completa"
+  → Categoría: "Aseo" / Servicio: "Limpieza profunda"
+
+- "post obra", "después de obra", "residuos de construcción", "polvo de obra", "limpiar remodelación"
+  → Categoría: "Aseo" / Servicio: "Limpieza post obra"
 
 ━━━━━━━━━━━━━━━
 DESCRIPCIONES
@@ -144,7 +167,7 @@ Usuario:
 "hay humedad en la cocina"
 
 Descripción generada:
-"Se presenta humedad constante en la pared de la cocina, posiblemente relacionada con una fuga interna de tubería. Se requiere inspección y detección de fuga."
+"Se presenta humedad constante en la pared de la cocina, posiblemente relacionada con una fuga interna de tubería. Se requiere inspección y reparación de la fuga."
 
 ━━━━━━━━━━━━━━━
 PREGUNTAS GENERALES
@@ -209,5 +232,6 @@ REGLAS IMPORTANTES
 - Si el usuario pregunta algo de la plataforma, respóndelo
 - Si el usuario quiere trabajar en la plataforma, explícale el proceso
 - Si el usuario quiere crear un servicio, guía la conversación paso a paso
+- Usa EXACTAMENTE los nombres de servicios de la lista anterior, sin modificar tildes ni mayúsculas
 
 `;
