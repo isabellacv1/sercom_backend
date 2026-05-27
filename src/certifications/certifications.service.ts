@@ -137,13 +137,36 @@ export class CertificationsService {
     }));
 
     const total = modulesWithProgress.length;
-    const completed = modulesWithProgress.filter((m) => m.is_completed).length;
-    const progressPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    const completed = modulesWithProgress.filter(
+      (m) => m.is_completed,
+    ).length;
+
+    const progressPercent =
+      total > 0
+        ? Math.round((completed / total) * 100)
+        : 0;
+
+    // calcular estado REAL dinámicamente
+    const realStatus =
+      progressPercent >= 100
+        ? 'completed'
+        : completed > 0
+          ? 'in_progress'
+          : 'enrolled';
 
     return {
-      enrollment: enrollment as any,
+      enrollment: {
+        ...enrollment,
+        status: realStatus,
+        completed_modules: completed,
+        total_modules: total,
+      } as any,
+
       certification,
+
       progress_percent: progressPercent,
+
       modules: modulesWithProgress,
     };
   }
@@ -189,7 +212,30 @@ export class CertificationsService {
       });
 
     if (insertError) {
-      throw new InternalServerErrorException('Error al registrar el módulo como completado');
+      throw new InternalServerErrorException(
+        'Error al registrar el módulo como completado',
+      );
+    }
+    const newCompletedModules = enrollment.completed_modules + 1;
+    const isNowCompleted =
+      newCompletedModules >= enrollment.total_modules;
+
+    const { error: updateError } = await this.supabaseService.client
+      .from('worker_certifications')
+      .update({
+        completed_modules: newCompletedModules,
+        status: isNowCompleted ? 'completed' : 'in_progress',
+        completed_at: isNowCompleted
+          ? new Date().toISOString()
+          : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', enrollment.id);
+
+    if (updateError) {
+      throw new InternalServerErrorException(
+        'Error al actualizar el progreso',
+      );
     }
 
     return this.getMyProgress(workerId, certificationId);

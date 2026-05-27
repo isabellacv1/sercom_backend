@@ -25,13 +25,13 @@ export class CertificationsController {
     return this.certificationsService.getWorkerCompletedCertifications(workerId);
   }
   
-  @Auth(AppRoles.WORKER)
+  @Auth()
   @Get('me/enrollments')
   getMyEnrollments(@CurrentUser() user: JwtUser) {
     return this.certificationsService.getMyEnrollments(user.sub);
   }
 
-  @Auth(AppRoles.WORKER)
+  @Auth()
   @Get(':certificationId/me/progress')
   getMyProgress(
     @CurrentUser() user: JwtUser,
@@ -40,7 +40,7 @@ export class CertificationsController {
     return this.certificationsService.getMyProgress(user.sub, certificationId);
   }
 
-  @Auth(AppRoles.WORKER)
+  @Auth()
   @Post(':certificationId/me/modules/complete')
   completeModule(
     @CurrentUser() user: JwtUser,
@@ -65,7 +65,7 @@ export class CertificationsController {
     return this.certificationsService.findOne(id);
   }
 
-  @Auth(AppRoles.WORKER)
+  @Auth()
   @Post(':id/enroll')
   enroll(
     @CurrentUser() user: JwtUser,
