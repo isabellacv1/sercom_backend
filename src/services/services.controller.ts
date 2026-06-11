@@ -129,4 +129,13 @@ export class ServicesController {
   ) {
     return this.servicesService.findCandidateWorkers(user.sub, id);
   }
+
+  @Post(':id/dispute')
+  reportDispute(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() body: { reason: string; description: string; photo_urls?: string[] },
+  ) {
+    return this.servicesService.reportDispute(user.sub, id, body);
+  }
 }

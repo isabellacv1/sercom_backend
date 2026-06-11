@@ -129,9 +129,68 @@ export class ReviewsService {
       !!service.assigned_worker_id &&
       !reviewResponse.data;
 
+    // Verificar si el técnico ya calificó al cliente
+    const workerReviewResponse = await this.supabaseService.client
+      .from('worker_client_reviews')
+      .select('id')
+      .eq('service_id', serviceId)
+      .eq('worker_id', userId)
+      .maybeSingle();
+
+    const canWorkerReview =
+      service.assigned_worker_id === userId &&
+      service.status === 'completed' &&
+      !!service.client_id &&
+      !workerReviewResponse.data;
+
     return {
       review: reviewResponse.data,
       can_review: canReview,
+      can_worker_review: canWorkerReview,
+    };
+  }
+
+  async createWorkerReview(workerId: string, dto: CreateReviewDto) {
+    const serviceResponse = await this.supabaseService.client
+      .from('services')
+      .select('id, status, client_id, assigned_worker_id')
+      .eq('id', dto.service_id)
+      .maybeSingle();
+
+    if (serviceResponse.error) {
+      throw new InternalServerErrorException(serviceResponse.error.message);
+    }
+
+    const service = serviceResponse.data;
+    if (!service) throw new NotFoundException('Servicio no encontrado');
+
+    if (service.assigned_worker_id !== workerId) {
+      throw new ForbiddenException('Solo el técnico del servicio puede calificarlo');
+    }
+
+    if (service.status !== 'completed') {
+      throw new BadRequestException('El servicio debe estar completado para calificar');
+    }
+
+    const insertResponse = await this.supabaseService.client
+      .from('worker_client_reviews')
+      .insert({
+        service_id: dto.service_id,
+        worker_id: workerId,
+        client_id: service.client_id,
+        rating: dto.rating,
+        comment: dto.comment?.trim() || null,
+      })
+      .select('id, service_id, worker_id, client_id, rating, comment, created_at')
+      .single();
+
+    if (insertResponse.error) {
+      throw new InternalServerErrorException(insertResponse.error.message);
+    }
+
+    return {
+      message: 'Calificación al cliente registrada exitosamente',
+      review: insertResponse.data,
     };
   }
 

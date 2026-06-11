@@ -1286,4 +1286,46 @@ export class ServicesService {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
+
+  async reportDispute(
+    userId: string,
+    serviceId: string,
+    body: { reason: string; description: string; photo_urls?: string[] },
+  ) {
+    const { data: service, error: svcError } =
+      await this.supabaseService.client
+        .from('services')
+        .select('id, client_id, assigned_worker_id, status')
+        .eq('id', serviceId)
+        .single();
+
+    if (svcError || !service) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
+
+    const isParticipant =
+      service.client_id === userId || service.assigned_worker_id === userId;
+
+    if (!isParticipant) {
+      throw new ForbiddenException('No tienes permiso para disputar este servicio');
+    }
+
+    const { error } = await this.supabaseService.client
+      .from('disputes')
+      .insert({
+        service_id: serviceId,
+        reporter_id: userId,
+        reason: body.reason,
+        description: body.description,
+        photo_urls: body.photo_urls ?? [],
+        status: 'open',
+      });
+
+    if (error) {
+      this.logger.error(`Error creating dispute: ${error.message}`);
+      throw new InternalServerErrorException('No se pudo registrar la disputa');
+    }
+
+    return { message: 'Disputa registrada. Nuestro equipo la revisará pronto.' };
+  }
 }

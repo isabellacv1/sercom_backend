@@ -60,6 +60,49 @@ export class AuthService {
     };
   }
 
+  async socialLogin(supabaseToken: string) {
+    if (!supabaseToken) {
+      throw new UnauthorizedException('Token requerido');
+    }
+
+    const { data, error } =
+      await this.supabaseService.client.auth.getUser(supabaseToken);
+
+    if (error || !data.user) {
+      throw new UnauthorizedException('Token inválido');
+    }
+
+    const user = data.user;
+    let profile = await this.profilesService.findByUserId(user.id);
+
+    if (!profile) {
+      const email = user.email ?? '';
+      const name =
+        (user.user_metadata?.full_name as string | undefined) ??
+        (user.user_metadata?.name as string | undefined) ??
+        email.split('@')[0];
+      await this.profilesService.create(user.id, {
+        email,
+        fullName: name,
+        role: 'client',
+      });
+      profile = await this.profilesService.findByUserId(user.id);
+    }
+
+    return {
+      message: 'Login exitoso',
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: profile?.full_name ?? null,
+        roles: profile?.roles ?? [],
+        activeRole: profile?.active_role ?? 'client',
+        status: profile?.status ?? null,
+      },
+      access_token: supabaseToken,
+    };
+  }
+
   async register(dto: RegisterDto, files?: RegisterFiles) {
     const email = dto.email.toLowerCase().trim();
     const role = dto.role ?? 'client';

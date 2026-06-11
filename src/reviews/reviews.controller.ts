@@ -25,6 +25,12 @@ export class ReviewsController {
     return this.reviewsService.create(user.sub, dto);
   }
 
+  @Auth(AppRoles.WORKER)
+  @Post('reviews/worker-review')
+  createWorkerReview(@CurrentUser() user: JwtUser, @Body() dto: CreateReviewDto) {
+    return this.reviewsService.createWorkerReview(user.sub, dto);
+  }
+
   @Auth()
   @Get('services/:serviceId/review')
   findByService(

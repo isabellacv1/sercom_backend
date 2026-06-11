@@ -26,6 +26,11 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
+  @Post('social-login')
+  socialLogin(@Body('supabase_token') token: string) {
+    return this.authService.socialLogin(token);
+  }
+
   @Post('register')
   @UseInterceptors(
     FileFieldsInterceptor(
