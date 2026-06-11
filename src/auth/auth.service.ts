@@ -212,16 +212,37 @@ export class AuthService {
     return data.publicUrl;
   }
 
-  async changeEmail(userId: string, newEmail: string) {
-    const email = newEmail.toLowerCase().trim();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  async changeEmail(oldEmail: string, newEmail: string) {
+    const oldEmailNorm = oldEmail.toLowerCase().trim();
+    const newEmailNorm = newEmail.toLowerCase().trim();
+
+    if (!newEmailNorm || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmailNorm)) {
       throw new BadRequestException('Correo inválido');
     }
+    if (oldEmailNorm === newEmailNorm) {
+      throw new BadRequestException('El nuevo correo debe ser diferente');
+    }
 
-    const { data, error } = await this.supabaseService.client.auth.admin.updateUserById(
-      userId,
-      { email },
+    const { data: listData, error: listError } =
+      await this.supabaseService.client.auth.admin.listUsers();
+
+    if (listError) {
+      throw new InternalServerErrorException('No se pudo procesar la solicitud');
+    }
+
+    const user = listData.users.find(
+      (u) => u.email?.toLowerCase() === oldEmailNorm,
     );
+
+    if (!user) {
+      throw new BadRequestException('No se encontró una cuenta con ese correo');
+    }
+
+    const { data, error } =
+      await this.supabaseService.client.auth.admin.updateUserById(user.id, {
+        email: newEmailNorm,
+        email_confirm: false,
+      });
 
     if (error || !data.user) {
       throw new InternalServerErrorException('No se pudo actualizar el correo');

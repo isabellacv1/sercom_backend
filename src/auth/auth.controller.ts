@@ -34,13 +34,12 @@ export class AuthController {
     return this.authService.socialLogin(token);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Post('change-email')
   changeEmail(
-    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Body('old_email') oldEmail: string,
     @Body('new_email') newEmail: string,
   ) {
-    return this.authService.changeEmail(user.sub, newEmail);
+    return this.authService.changeEmail(oldEmail, newEmail);
   }
 
   @Post('register')
