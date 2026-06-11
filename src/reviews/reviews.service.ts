@@ -130,7 +130,8 @@ export class ReviewsService {
       !reviewResponse.data;
 
     // Verificar si el técnico ya calificó al cliente
-    const workerReviewResponse = await this.supabaseService.client
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const workerReviewResponse = await (this.supabaseService.client as any)
       .from('worker_client_reviews')
       .select('id')
       .eq('service_id', serviceId)
@@ -172,7 +173,8 @@ export class ReviewsService {
       throw new BadRequestException('El servicio debe estar completado para calificar');
     }
 
-    const insertResponse = await this.supabaseService.client
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const insertResponse = await (this.supabaseService.client as any)
       .from('worker_client_reviews')
       .insert({
         service_id: dto.service_id,

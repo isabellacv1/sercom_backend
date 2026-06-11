@@ -1310,7 +1310,8 @@ export class ServicesService {
       throw new ForbiddenException('No tienes permiso para disputar este servicio');
     }
 
-    const { error } = await this.supabaseService.client
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (this.supabaseService.client as any)
       .from('disputes')
       .insert({
         service_id: serviceId,
