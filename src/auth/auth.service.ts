@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
   InternalServerErrorException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { LoginDto } from './dto/login.dto';
@@ -209,5 +210,23 @@ export class AuthService {
       .getPublicUrl(filePath);
 
     return data.publicUrl;
+  }
+
+  async changeEmail(userId: string, newEmail: string) {
+    const email = newEmail.toLowerCase().trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('Correo inválido');
+    }
+
+    const { data, error } = await this.supabaseService.client.auth.admin.updateUserById(
+      userId,
+      { email },
+    );
+
+    if (error || !data.user) {
+      throw new InternalServerErrorException('No se pudo actualizar el correo');
+    }
+
+    return { message: 'Correo actualizado. Revisa tu nueva bandeja de entrada.' };
   }
 }

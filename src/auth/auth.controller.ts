@@ -3,6 +3,7 @@ import {
   Controller,
   Post,
   UploadedFiles,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
@@ -11,6 +12,8 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import type { MulterFile } from '../common/types/multer.types';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import * as currentUserDecorator from './decorators/current-user.decorator';
 
 type RegisterUploadedFiles = {
   cedula_document?: MulterFile[];
@@ -29,6 +32,15 @@ export class AuthController {
   @Post('social-login')
   socialLogin(@Body('supabase_token') token: string) {
     return this.authService.socialLogin(token);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-email')
+  changeEmail(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Body('new_email') newEmail: string,
+  ) {
+    return this.authService.changeEmail(user.sub, newEmail);
   }
 
   @Post('register')
