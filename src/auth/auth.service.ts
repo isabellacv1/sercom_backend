@@ -219,10 +219,6 @@ export class AuthService {
     if (!newEmailNorm || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmailNorm)) {
       throw new BadRequestException('Correo inválido');
     }
-    if (oldEmailNorm === newEmailNorm) {
-      throw new BadRequestException('El nuevo correo debe ser diferente');
-    }
-
     // Buscar el ID del usuario por email en la tabla profiles
     const { data: profile, error: profileError } =
       await this.supabaseService.client
@@ -239,6 +235,10 @@ export class AuthService {
       throw new BadRequestException('No se encontró una cuenta con ese correo');
     }
 
+    if (oldEmailNorm === newEmailNorm) {
+      return { message: 'Correo actualizado. Revisa tu nueva bandeja de entrada.' };
+    }
+
     const { data, error } =
       await this.supabaseService.client.auth.admin.updateUserById(profile.id, {
         email: newEmailNorm,
@@ -247,6 +247,12 @@ export class AuthService {
     if (error || !data.user) {
       throw new InternalServerErrorException('No se pudo actualizar el correo');
     }
+
+    // Actualizar email en profiles también
+    await this.supabaseService.client
+      .from('profiles')
+      .update({ email: newEmailNorm })
+      .eq('id', profile.id);
 
     return { message: 'Correo actualizado. Revisa tu nueva bandeja de entrada.' };
   }
