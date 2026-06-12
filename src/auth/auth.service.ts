@@ -228,7 +228,7 @@ export class AuthService {
       await this.supabaseService.client
         .from('profiles')
         .select('id')
-        .ilike('email', oldEmailNorm)
+        .eq('email', oldEmailNorm)
         .maybeSingle();
 
     if (profileError) {
