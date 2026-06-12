@@ -191,10 +191,10 @@ export class ServicesService {
       throw new InternalServerErrorException(historyError.message);
     }
 
-    const candidateWorkers = await this.findCandidateWorkers(
-      clientId,
-      serviceId,
-    );
+    let candidateWorkers = { candidates: [] as any[] };
+    try {
+      candidateWorkers = await this.findCandidateWorkers(clientId, serviceId);
+    } catch (_) {}
 
     return {
       message: 'Pre-solicitud completada exitosamente',
@@ -697,7 +697,10 @@ export class ServicesService {
       throw new InternalServerErrorException(historyError.message);
     }
 
-    const candidateWorkers = await this.findCandidateWorkers(clientId, data.id);
+    let candidateWorkers = { candidates: [] as any[] };
+    try {
+      candidateWorkers = await this.findCandidateWorkers(clientId, data.id);
+    } catch (_) {}
 
     return {
       message: 'Solicitud de servicio creada exitosamente',
