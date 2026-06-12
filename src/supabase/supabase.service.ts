@@ -6,10 +6,12 @@ import { Database } from 'src/types/supabase';
 @Injectable()
 export class SupabaseService {
   readonly client: SupabaseClient<Database>;
+  readonly anonClient: SupabaseClient<Database>;
 
   constructor(private readonly configService: ConfigService) {
     const url = this.configService.get<string>('SUPABASE_URL');
     const key = this.configService.get<string>('SUPABASE_SECRET_KEY');
+    const anonKey = this.configService.get<string>('SUPABASE_ANON_KEY');
 
     if (!url || !key) {
       throw new InternalServerErrorException(
@@ -18,6 +20,14 @@ export class SupabaseService {
     }
 
     this.client = createClient<Database>(url, key, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
+    // Cliente con anon key — para signUp con envío real de email de verificación
+    this.anonClient = createClient<Database>(url, anonKey ?? key, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
