@@ -108,7 +108,7 @@ export class AuthService {
     const email = dto.email.toLowerCase().trim();
     const role = dto.role ?? 'client';
 
-    const { data, error } = await this.supabaseService.anonClient.auth.signUp({
+    const { data, error } = await this.supabaseService.client.auth.signUp({
       email,
       password: dto.password,
     });
