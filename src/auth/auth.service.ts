@@ -223,25 +223,25 @@ export class AuthService {
       throw new BadRequestException('El nuevo correo debe ser diferente');
     }
 
-    const { data: listData, error: listError } =
-      await this.supabaseService.client.auth.admin.listUsers();
+    // Buscar el ID del usuario por email en la tabla profiles
+    const { data: profile, error: profileError } =
+      await this.supabaseService.client
+        .from('profiles')
+        .select('id')
+        .ilike('email', oldEmailNorm)
+        .maybeSingle();
 
-    if (listError) {
+    if (profileError) {
       throw new InternalServerErrorException('No se pudo procesar la solicitud');
     }
 
-    const user = listData.users.find(
-      (u) => u.email?.toLowerCase() === oldEmailNorm,
-    );
-
-    if (!user) {
+    if (!profile?.id) {
       throw new BadRequestException('No se encontró una cuenta con ese correo');
     }
 
     const { data, error } =
-      await this.supabaseService.client.auth.admin.updateUserById(user.id, {
+      await this.supabaseService.client.auth.admin.updateUserById(profile.id, {
         email: newEmailNorm,
-        email_confirm: false,
       });
 
     if (error || !data.user) {
