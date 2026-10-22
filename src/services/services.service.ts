@@ -912,14 +912,17 @@ export class ServicesService {
       proposals:proposals(count)
     `);
 
-    if (statusFilter === 'active') {
-      query = query.eq('status', 'requested');
-    } else if (statusFilter === 'in_progress') {
+    if (statusFilter === 'in_progress') {
       query = query
         .or('status.eq.assigned,status.eq.on_the_way,status.eq.in_progress')
         .eq('assigned_worker_id', userId);
     } else if (statusFilter === 'history') {
       query = query.eq('assigned_worker_id', userId).eq('status', 'completed');
+    } else {
+      // 'active' o cualquier valor desconocido: solo solicitudes abiertas.
+      // Antes un filtro no reconocido devolvía todos los servicios (con
+      // direcciones y estados de otros clientes y profesionales).
+      query = query.eq('status', 'requested');
     }
 
     const { data, error } = await query.order('created_at', {

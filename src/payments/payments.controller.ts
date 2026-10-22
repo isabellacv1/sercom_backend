@@ -5,6 +5,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,6 +17,8 @@ import { ReleasePaymentDto } from './dto/release-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { CompletePayoutDto } from './dto/complete-payout.dto';
 import type { WompiEvent } from './wompi.service';
+import { PayoutAccountService } from './payout-account.service';
+import { PayoutAccountDto } from './dto/payout-account.dto';
 
 type JwtUser = { sub: string };
 
@@ -48,7 +51,10 @@ type JwtUser = { sub: string };
 @UseGuards(JwtAuthGuard)
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly payoutAccountService: PayoutAccountService,
+  ) {}
 
   // ─── Crear checkout Wompi ─────────────────────────────────────────────────
 
@@ -70,6 +76,21 @@ export class PaymentsController {
   @Get('worker/wallet')
   getWorkerWallet(@CurrentUser() user: JwtUser) {
     return this.paymentsService.getWorkerWallet(user.sub);
+  }
+
+  // ─── Dónde recibe sus pagos el trabajador ────────────────────────────────
+
+  @Get('worker/payout-account')
+  getPayoutAccount(@CurrentUser() user: JwtUser) {
+    return this.payoutAccountService.get(user.sub);
+  }
+
+  @Put('worker/payout-account')
+  savePayoutAccount(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: PayoutAccountDto,
+  ) {
+    return this.payoutAccountService.upsert(user.sub, dto);
   }
 
   @Get('worker/balance')

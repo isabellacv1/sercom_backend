@@ -73,6 +73,7 @@ function setup(transactions: WompiTransaction[]) {
     { get: () => undefined } as unknown as ConfigService,
     push as any,
     wompi,
+    { findByWorkers: async () => new Map() } as any,
   );
 
   return { service, tables, push };

@@ -21,6 +21,7 @@ import { ConfirmManualPaymentDto } from './dto/confirm-manual-payment.dto';
 import { ReleasePaymentDto } from './dto/release-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { CompletePayoutDto } from './dto/complete-payout.dto';
+import { PayoutAccountService } from './payout-account.service';
 
 type PaymentStatus =
   | 'pending'
@@ -51,6 +52,7 @@ export class PaymentsService {
     private readonly configService: ConfigService,
     private readonly pushService: PushNotificationsService,
     private readonly wompi: WompiService,
+    private readonly payoutAccounts: PayoutAccountService,
   ) {
     this.frontendUrl =
       this.configService.get<string>('PAYMENTS_FRONTEND_URL') ??
@@ -470,6 +472,9 @@ export class PaymentsService {
           .in('id', workerIds)
       : { data: [] as any[] };
     const workerById = new Map((workers ?? []).map((w) => [w.id, w]));
+    const accountByWorker = await this.payoutAccounts.findByWorkers(
+      workerIds as string[],
+    );
 
     const payouts = (rows ?? []).map((r) => {
       const worker = workerById.get(r.worker_id);
@@ -481,6 +486,8 @@ export class PaymentsService {
         worker_name: worker?.full_name ?? null,
         worker_email: worker?.email ?? null,
         worker_phone: worker?.phone ?? null,
+        // A dónde transferir: Nequi / Daviplata / cuenta bancaria del técnico.
+        payout_account: accountByWorker.get(r.worker_id) ?? null,
         worker_amount: Number(r.worker_amount ?? 0),
         commission_amount: Number(r.commission_amount ?? 0),
         amount_total: Number(r.amount_total ?? 0),
