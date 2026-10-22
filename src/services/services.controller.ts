@@ -5,8 +5,17 @@ import {
   Param,
   Post,
   Query,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import type { MulterFile } from '../common/types/multer.types';
+import {
+  MAX_EVIDENCE_PER_SERVICE,
+  ServiceEvidenceService,
+} from './service-evidence.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as currentUserDecorator from '../auth/decorators/current-user.decorator';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -21,7 +30,10 @@ import { FindOpportunitiesQueryDto } from './dto/find-opportunities-query.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('services')
 export class ServicesController {
-  constructor(private readonly servicesService: ServicesService) {}
+  constructor(
+    private readonly servicesService: ServicesService,
+    private readonly evidenceService: ServiceEvidenceService,
+  ) {}
 
   @Get('opportunities')
   findOpportunities(
@@ -72,6 +84,29 @@ export class ServicesController {
     @Param('id') id: string,
   ) {
     return this.servicesService.findStatusHistory(user.sub, id);
+  }
+
+  // Evidencia del trabajo: obligatoria para pasar el servicio a "Finalizado".
+  @Post(':id/evidence')
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_EVIDENCE_PER_SERVICE, {
+      storage: memoryStorage(),
+    }),
+  )
+  uploadEvidence(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @UploadedFiles() files: MulterFile[],
+  ) {
+    return this.evidenceService.upload(user.sub, id, files);
+  }
+
+  @Get(':id/evidence')
+  listEvidence(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.evidenceService.list(user.sub, id);
   }
 
   @Patch(':id/confirm')

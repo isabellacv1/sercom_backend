@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ServicesService } from './services.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { PaymentsService } from '../payments/payments.service';
+import { ServiceEvidenceService } from './service-evidence.service';
 
 describe('ServicesService', () => {
   let instance: ServicesService;
@@ -11,7 +12,8 @@ describe('ServicesService', () => {
       providers: [
         ServicesService,
         { provide: SupabaseService, useValue: {} },
-        { provide: PaymentsService, useValue: {} }
+        { provide: PaymentsService, useValue: {} },
+        { provide: ServiceEvidenceService, useValue: {} },
       ],
     }).compile();
 

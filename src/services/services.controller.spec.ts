@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServicesController } from './services.controller';
 import { ServicesService } from './services.service';
+import { ServiceEvidenceService } from './service-evidence.service';
 
 describe('ServicesController', () => {
   let instance: ServicesController;
@@ -9,7 +10,8 @@ describe('ServicesController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ServicesController],
       providers: [
-        { provide: ServicesService, useValue: {} }
+        { provide: ServicesService, useValue: {} },
+        { provide: ServiceEvidenceService, useValue: {} },
       ],
     }).compile();
 

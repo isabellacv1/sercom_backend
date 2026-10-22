@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { SupabaseService } from '../supabase/supabase.service';
 import { PaymentsService } from '../payments/payments.service';
+import { ServiceEvidenceService } from './service-evidence.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
@@ -24,6 +25,7 @@ export class ServicesService {
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly paymentsService: PaymentsService,
+    private readonly evidenceService: ServiceEvidenceService,
   ) {}
 
   async createPreRequest(clientId: string, dto: CreatePreServiceRequestDto) {
@@ -313,6 +315,15 @@ export class ServicesService {
           'El servicio no puede iniciar hasta que el pago esté garantizado por el cliente',
         );
       }
+    }
+
+    if (
+      nextStatus === 'completed' &&
+      (await this.evidenceService.count(serviceId)) === 0
+    ) {
+      throw new BadRequestException(
+        'Adjunta al menos una foto del trabajo realizado para finalizar',
+      );
     }
 
     const updatePayload: ServiceUpdate = {
