@@ -63,6 +63,21 @@ export class AuthService {
     };
   }
 
+  async refresh(refreshToken: string) {
+    const { data, error } = await this.supabaseService
+      .createSessionClient()
+      .auth.refreshSession({ refresh_token: refreshToken });
+
+    if (error || !data.session) {
+      throw new UnauthorizedException('Sesión expirada');
+    }
+
+    return {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+    };
+  }
+
   async socialLogin(supabaseToken: string) {
     if (!supabaseToken) {
       throw new UnauthorizedException('Token requerido');

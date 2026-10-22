@@ -15,6 +15,7 @@ describe('AuthService', () => {
     const sessionSignIn = jest.fn();
     const createUser = jest.fn();
     const deleteUser = jest.fn();
+    const refreshSession = jest.fn();
 
     const supabaseService = {
       client: {
@@ -24,7 +25,7 @@ describe('AuthService', () => {
         },
       },
       createSessionClient: jest.fn(() => ({
-        auth: { signInWithPassword: sessionSignIn },
+        auth: { signInWithPassword: sessionSignIn, refreshSession },
       })),
     };
     const profilesService = {
@@ -36,7 +37,7 @@ describe('AuthService', () => {
       supabaseService as never,
       profilesService as never,
     );
-    return { service, supabaseService, profilesService, sharedSignIn, sessionSignIn, createUser, deleteUser };
+    return { service, supabaseService, profilesService, sharedSignIn, sessionSignIn, createUser, deleteUser, refreshSession };
   };
 
   it('login usa un cliente de sesión aislado, nunca el compartido', async () => {
@@ -96,5 +97,24 @@ describe('AuthService', () => {
       t.service.register({ fullName: 'Ana', email: 'a@b.co', password: '12345678' }),
     ).rejects.toThrow('insert failed');
     expect(t.deleteUser).toHaveBeenCalledWith('orphan');
+  });
+
+  it('refresh devuelve tokens nuevos', async () => {
+    const { service, refreshSession } = makeService();
+    refreshSession.mockResolvedValue({
+      data: { session: { access_token: 'a2', refresh_token: 'r2' } },
+      error: null,
+    });
+    await expect(service.refresh('r1')).resolves.toEqual({
+      access_token: 'a2',
+      refresh_token: 'r2',
+    });
+    expect(refreshSession).toHaveBeenCalledWith({ refresh_token: 'r1' });
+  });
+
+  it('refresh con token vencido responde 401', async () => {
+    const { service, refreshSession } = makeService();
+    refreshSession.mockResolvedValue({ data: { session: null }, error: { message: 'expired' } });
+    await expect(service.refresh('r1')).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });
