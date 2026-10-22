@@ -37,7 +37,7 @@ export class ProfilesService {
     }
 
     try {
-      const bucketName = 'worker-documents';
+      const bucketName = 'profile-photos';
       const safeOriginalName = file.originalname.replace(
         /[^a-zA-Z0-9.-]/g,
         '_',
@@ -63,9 +63,21 @@ export class ProfilesService {
 
       const photoUrl = data.publicUrl;
 
+      // Antes la URL solo se devolvía y se perdía al recargar: se persiste en
+      // profile_image_url (lo que leen perfiles, propuestas y chat).
+      const { data: saved, error: saveError } = await this.supabaseService.client
+        .from('profiles')
+        .update({ profile_image_url: photoUrl, worker_photo_url: photoUrl })
+        .eq('id', userId)
+        .select('*')
+        .single();
+
+      if (saveError) {
+        throw new InternalServerErrorException(saveError.message);
+      }
+
       const updatedProfile = {
-        ...profile,
-        worker_photo_url: photoUrl,
+        ...saved,
         workerPhotoUrl: photoUrl,
       };
 
@@ -80,10 +92,15 @@ export class ProfilesService {
     }
   }
 
+  /** Campos que cualquier usuario autenticado puede ver de otro perfil. */
+  static readonly PUBLIC_FIELDS =
+    'id, full_name, profile_image_url, bio, specialty, city, roles, rating_avg, rating_count, is_published, created_at';
+
   async findAll() {
+    // Antes devolvía `*` (cédula, teléfono, correo, documentos) a cualquiera.
     const { data, error } = await this.supabaseService.client
       .from('profiles')
-      .select('*')
+      .select(ProfilesService.PUBLIC_FIELDS)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -91,6 +108,41 @@ export class ProfilesService {
     }
 
     return data;
+  }
+
+  /** Perfil público + estadísticas de servicios, sin datos sensibles. */
+  async findPublic(profileId: string) {
+    const { data: profile, error } = await this.supabaseService.client
+      .from('profiles')
+      .select(ProfilesService.PUBLIC_FIELDS)
+      .eq('id', profileId)
+      .maybeSingle();
+
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!profile) throw new NotFoundException('Perfil no encontrado');
+
+    const isWorker = (profile.roles ?? []).includes('worker');
+    const column = isWorker ? 'assigned_worker_id' : 'client_id';
+
+    const [total, completed] = await Promise.all([
+      this.supabaseService.client
+        .from('services')
+        .select('id', { count: 'exact', head: true })
+        .eq(column, profileId),
+      this.supabaseService.client
+        .from('services')
+        .select('id', { count: 'exact', head: true })
+        .eq(column, profileId)
+        .eq('status', 'completed'),
+    ]);
+
+    return {
+      ...profile,
+      stats: {
+        total_services: total.count ?? 0,
+        completed_services: completed.count ?? 0,
+      },
+    };
   }
 
   async findByEmail(email: string) {
@@ -151,6 +203,7 @@ export class ProfilesService {
       profileToInsert.cedula_document_url = dto.cedulaDocumentUrl ?? null;
 
       profileToInsert.worker_photo_url = dto.workerPhotoUrl ?? null;
+      profileToInsert.profile_image_url = dto.workerPhotoUrl ?? null;
     }
 
     const { data, error } = await this.supabaseService.client
@@ -173,6 +226,8 @@ export class ProfilesService {
       fullName?: string;
       phone?: string;
       address?: string;
+      city?: string;
+      bio?: string;
     },
   ) {
     const profile = await this.findByUserId(userId);
@@ -186,15 +241,36 @@ export class ProfilesService {
     const payload: ProfileUpdate = {};
 
     if (fullName !== undefined) {
-      payload.full_name = fullName.trim();
+      const name = String(fullName).trim();
+      if (name.length < 3 || name.length > 120) {
+        throw new BadRequestException('El nombre debe tener entre 3 y 120 caracteres');
+      }
+      payload.full_name = name;
     }
 
     if (dto.phone !== undefined) {
-      payload.phone = dto.phone.trim();
+      const phone = String(dto.phone).trim();
+      if (phone && !/^\+?[0-9\s-]{7,15}$/.test(phone)) {
+        throw new BadRequestException('El teléfono no es válido');
+      }
+      payload.phone = phone;
     }
 
     if (dto.address !== undefined) {
-      payload.address = dto.address.trim();
+      payload.address = String(dto.address).trim();
+    }
+
+    // Ciudad y descripción se editaban en la app pero se descartaban.
+    if (dto.city !== undefined) {
+      payload.city = String(dto.city).trim();
+    }
+
+    if (dto.bio !== undefined) {
+      const bio = String(dto.bio).trim();
+      if (bio.length > 500) {
+        throw new BadRequestException('La descripción admite máximo 500 caracteres');
+      }
+      payload.bio = bio;
     }
 
     if (Object.keys(payload).length === 0) {

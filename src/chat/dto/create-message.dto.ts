@@ -4,8 +4,10 @@ export class CreateMessageDto {
   @IsUUID()
   roomId: string;
 
+  /** Se ignora: el remitente es siempre el usuario del token. */
+  @IsOptional()
   @IsUUID()
-  senderId: string;
+  senderId?: string;
 
   @IsOptional()
   @IsString()

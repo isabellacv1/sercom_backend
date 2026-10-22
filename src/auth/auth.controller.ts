@@ -1,3 +1,5 @@
+import { Auth } from './decorators/auth.decorator';
+import { CurrentUser, JwtUser } from './decorators/current-user.decorator';
 import {
   Body,
   Controller,
@@ -34,12 +36,14 @@ export class AuthController {
     return this.authService.socialLogin(token);
   }
 
+  @Auth()
   @Post('change-email')
   changeEmail(
+    @CurrentUser() user: JwtUser,
     @Body('old_email') oldEmail: string,
     @Body('new_email') newEmail: string,
   ) {
-    return this.authService.changeEmail(oldEmail, newEmail);
+    return this.authService.changeEmail(user.sub, oldEmail, newEmail);
   }
 
   @Post('register')

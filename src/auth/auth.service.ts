@@ -30,8 +30,10 @@ export class AuthService {
   async login(dto: LoginDto) {
     const email = dto.email.toLowerCase().trim();
 
-    const { data, error } =
-      await this.supabaseService.client.auth.signInWithPassword({
+    // Cliente aislado: no contaminar el cliente compartido con la sesión.
+    const { data, error } = await this.supabaseService
+      .createSessionClient()
+      .auth.signInWithPassword({
         email,
         password: dto.password,
       });
@@ -108,17 +110,25 @@ export class AuthService {
     const email = dto.email.toLowerCase().trim();
     const role = dto.role ?? 'client';
 
-    const { data, error } = await this.supabaseService.anonClient.auth.signUp({
-      email,
-      password: dto.password,
-    });
+    // Se crea el usuario ya confirmado con la service key. El proyecto no
+    // tiene SMTP propio: el correo de confirmación de Supabase solo llega a
+    // miembros del equipo, lo que hacía fallar todo registro con
+    // "Error sending confirmation email".
+    const { data, error } =
+      await this.supabaseService.client.auth.admin.createUser({
+        email,
+        password: dto.password,
+        email_confirm: true,
+        user_metadata: { full_name: dto.fullName, role },
+      });
 
     if (error) {
-      if (error.message.includes('User already registered')) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('already') || (error as { code?: string }).code === 'email_exists') {
         throw new ConflictException('El correo ya está registrado');
       }
 
-      throw new InternalServerErrorException(error.message);
+      throw new InternalServerErrorException('No se pudo crear la cuenta');
     }
 
     if (!data.user) {
@@ -146,24 +156,28 @@ export class AuthService {
       }
     }
 
-    const profile = await this.profilesService.create(data.user.id, {
-      fullName: dto.fullName,
-      email,
-      role,
-      cedula: role === 'worker' ? dto.cedula : undefined,
-      phone: dto.phone,
-      address: role === 'worker' ? dto.address : undefined,
-      specialty: role === 'worker' ? dto.specialty : undefined,
-
-      // Estas dos propiedades deben existir en tu ProfilesService.
-      cedulaDocumentUrl,
-      workerPhotoUrl,
-    });
+    let profile: Awaited<ReturnType<ProfilesService['create']>>;
+    try {
+      profile = await this.profilesService.create(data.user.id, {
+        fullName: dto.fullName,
+        email,
+        role,
+        cedula: role === 'worker' ? dto.cedula : undefined,
+        phone: dto.phone,
+        address: role === 'worker' ? dto.address : undefined,
+        specialty: role === 'worker' ? dto.specialty : undefined,
+        cedulaDocumentUrl,
+        workerPhotoUrl,
+      });
+    } catch (e) {
+      // Sin perfil la cuenta queda inutilizable: se revierte el usuario de
+      // auth para no dejar cuentas huérfanas que bloqueen el correo.
+      await this.supabaseService.client.auth.admin.deleteUser(data.user.id);
+      throw e;
+    }
 
     return {
-      message: data.session
-        ? 'Registro exitoso'
-        : 'Registro exitoso. Verifica tu correo para activar la cuenta.',
+      message: 'Registro exitoso. Ya puedes iniciar sesión.',
       user: {
         id: data.user.id,
         email,
@@ -181,12 +195,16 @@ export class AuthService {
     };
   }
 
+  /**
+   * La cédula va a un bucket PRIVADO y se guarda solo su ruta interna (nunca
+   * una URL pública). La foto de perfil va al bucket público de fotos.
+   */
   private async uploadWorkerFile(
     userId: string,
     file: MulterFile,
     type: 'cedula' | 'foto',
   ): Promise<string> {
-    const bucketName = 'worker-documents';
+    const bucketName = type === 'cedula' ? 'identity-documents' : 'profile-photos';
 
     const safeOriginalName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
 
@@ -205,6 +223,8 @@ export class AuthService {
       );
     }
 
+    if (type === 'cedula') return `${bucketName}/${filePath}`;
+
     const { data } = this.supabaseService.client.storage
       .from(bucketName)
       .getPublicUrl(filePath);
@@ -212,27 +232,28 @@ export class AuthService {
     return data.publicUrl;
   }
 
-  async changeEmail(oldEmail: string, newEmail: string) {
-    const oldEmailNorm = oldEmail.toLowerCase().trim();
-    const newEmailNorm = newEmail.toLowerCase().trim();
+  /** Cambia el correo de la cuenta autenticada (nunca de un tercero). */
+  async changeEmail(userId: string, oldEmail: string, newEmail: string) {
+    const oldEmailNorm = (oldEmail ?? '').toLowerCase().trim();
+    const newEmailNorm = (newEmail ?? '').toLowerCase().trim();
 
     if (!newEmailNorm || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmailNorm)) {
       throw new BadRequestException('Correo inválido');
     }
-    // Buscar el ID del usuario por email en la tabla profiles
+
     const { data: profile, error: profileError } =
       await this.supabaseService.client
         .from('profiles')
-        .select('id')
-        .eq('email', oldEmailNorm)
+        .select('id, email')
+        .eq('id', userId)
         .maybeSingle();
 
     if (profileError) {
       throw new InternalServerErrorException('No se pudo procesar la solicitud');
     }
 
-    if (!profile?.id) {
-      throw new BadRequestException('No se encontró una cuenta con ese correo');
+    if (!profile?.id || (oldEmailNorm && profile.email?.toLowerCase() !== oldEmailNorm)) {
+      throw new BadRequestException('El correo actual no coincide con tu cuenta');
     }
 
     if (oldEmailNorm === newEmailNorm) {

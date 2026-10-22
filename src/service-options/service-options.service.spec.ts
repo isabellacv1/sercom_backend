@@ -1,18 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceOptionsService } from './service-options.service';
+import { SupabaseService } from '../supabase/supabase.service';
 
 describe('ServiceOptionsService', () => {
-  let service: ServiceOptionsService;
+  let instance: ServiceOptionsService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ServiceOptionsService],
+      providers: [
+        ServiceOptionsService,
+        { provide: SupabaseService, useValue: {} }
+      ],
     }).compile();
 
-    service = module.get<ServiceOptionsService>(ServiceOptionsService);
+    instance = module.get<ServiceOptionsService>(ServiceOptionsService);
   });
 
   it('should be defined', () => {
-    expect(service).toBeDefined();
+    expect(instance).toBeDefined();
   });
 });

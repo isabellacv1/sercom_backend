@@ -9,7 +9,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceAssignmentDto } from './dto/create-service-assignment.dto';
 import { RespondServiceAssignmentDto } from './dto/respond-service-assignment.dto';
 
-// El checkout URL se genera dinámicamente en POST /payments/mercadopago/link
+// El checkout URL se genera dinámicamente en POST /payments/checkout
 const MERCADO_PAGO_CHECKOUT_URL: null = null;
 
 type ServiceRow = {
@@ -377,8 +377,8 @@ export class ServiceAssignmentsService {
           worker_amount: workerAmount,
           currency: 'COP',
           status: 'pending',
-          provider: 'mercadopago',
-          payment_method: 'mercadopago_link',
+          provider: 'wompi',
+          payment_method: 'wompi_checkout',
           provider_reference: null,
           checkout_url: MERCADO_PAGO_CHECKOUT_URL,
         } as any)

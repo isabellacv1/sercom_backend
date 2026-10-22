@@ -741,6 +741,38 @@ export class ServicesService {
     }));
   }
 
+  /**
+   * Detalle para el seguimiento: accesible al cliente dueño y al trabajador
+   * asignado. Reemplaza la lectura directa (anónima) de Supabase desde la app.
+   */
+  async findForParticipant(userId: string, serviceId: string) {
+    const { data, error } = await this.supabaseService.sb
+      .from('services')
+      .select(
+        `
+        *,
+        category:service_categories(id, name),
+        service_option:service_options(id, title),
+        client:profiles!services_client_id_fkey(id, full_name, profile_image_url, rating_avg),
+        worker:profiles!services_assigned_worker_id_fkey(id, full_name, profile_image_url, rating_avg, rating_count)
+      `,
+      )
+      .eq('id', serviceId)
+      .maybeSingle();
+
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!data) throw new NotFoundException('Servicio no encontrado');
+
+    if (data.client_id !== userId && data.assigned_worker_id !== userId) {
+      throw new ForbiddenException('No participas en este servicio');
+    }
+
+    return {
+      ...data,
+      status_label: this.getStatusLabel(data.status),
+    };
+  }
+
   async findOneMine(clientId: string, serviceId: string) {
     const response = await this.supabaseService.sb
       .from('services')
@@ -1028,7 +1060,19 @@ export class ServicesService {
     };
   }
 
+  /**
+   * Simula un pago retenido (solo desarrollo/demo). En producción permitiría
+   * que un cliente "pague" sin pagar, por eso se bloquea con
+   * NODE_ENV=production o ALLOW_TEST_PAYMENTS=false.
+   */
   async forcePaidForTesting(clientId: string, serviceId: string) {
+    if (
+      process.env.NODE_ENV === 'production' ||
+      process.env.ALLOW_TEST_PAYMENTS === 'false'
+    ) {
+      throw new ForbiddenException('Los pagos de prueba están desactivados');
+    }
+
     const { data: service, error: svcErr } = await this.supabaseService.sb
       .from('services')
       .select('*')

@@ -3,18 +3,20 @@ import { ChatbotController } from './chatbot.controller';
 import { ChatbotService } from './chatbot.service';
 
 describe('ChatbotController', () => {
-  let controller: ChatbotController;
+  let instance: ChatbotController;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ChatbotController],
-      providers: [ChatbotService],
+      providers: [
+        { provide: ChatbotService, useValue: {} }
+      ],
     }).compile();
 
-    controller = module.get<ChatbotController>(ChatbotController);
+    instance = module.get<ChatbotController>(ChatbotController);
   });
 
   it('should be defined', () => {
-    expect(controller).toBeDefined();
+    expect(instance).toBeDefined();
   });
 });

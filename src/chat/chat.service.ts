@@ -73,7 +73,7 @@ import { CreateMessageDto } from './dto/create-message.dto';
         return data;
         }
 
-        async sendMessage(dto: CreateMessageDto) {
+        async sendMessage(dto: CreateMessageDto & { senderId: string }) {
             if (!dto.content && !dto.attachmentUrl) {
                 throw new BadRequestException('El mensaje debe tener contenido o archivo');
             }

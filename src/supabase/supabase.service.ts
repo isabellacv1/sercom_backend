@@ -7,6 +7,8 @@ import { Database } from 'src/types/supabase';
 export class SupabaseService {
   readonly client: SupabaseClient<Database>;
   readonly anonClient: SupabaseClient<Database>;
+  private readonly url: string;
+  private readonly anonKey: string;
 
   constructor(private readonly configService: ConfigService) {
     const url = this.configService.get<string>('SUPABASE_URL');
@@ -18,6 +20,9 @@ export class SupabaseService {
         'Faltan SUPABASE_URL o SUPABASE_SECRET_KEY en el .env',
       );
     }
+
+    this.url = url;
+    this.anonKey = anonKey ?? key;
 
     this.client = createClient<Database>(url, key, {
       auth: {
@@ -32,6 +37,19 @@ export class SupabaseService {
         autoRefreshToken: false,
         persistSession: false,
       },
+    });
+  }
+
+  /**
+   * Cliente efímero para operaciones de sesión (signInWithPassword…).
+   *
+   * NUNCA iniciar sesión con `client`: supabase-js guarda la sesión en la
+   * instancia y, a partir de ahí, todas las consultas del backend se
+   * ejecutarían con el JWT del último usuario logueado (RLS y datos ajenos).
+   */
+  createSessionClient(): SupabaseClient<Database> {
+    return createClient<Database>(this.url, this.anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
     });
   }
 

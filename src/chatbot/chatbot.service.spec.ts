@@ -1,18 +1,24 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChatbotService } from './chatbot.service';
+import { GeminiProvider } from './providers/gemini.provider';
+import { SupabaseService } from '../supabase/supabase.service';
 
 describe('ChatbotService', () => {
-  let service: ChatbotService;
+  let instance: ChatbotService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ChatbotService],
+      providers: [
+        ChatbotService,
+        { provide: GeminiProvider, useValue: {} },
+        { provide: SupabaseService, useValue: {} }
+      ],
     }).compile();
 
-    service = module.get<ChatbotService>(ChatbotService);
+    instance = module.get<ChatbotService>(ChatbotService);
   });
 
   it('should be defined', () => {
-    expect(service).toBeDefined();
+    expect(instance).toBeDefined();
   });
 });

@@ -114,6 +114,14 @@ export class ServicesController {
     return this.servicesService.findMine(user.sub);
   }
 
+  @Get(':id/tracking')
+  findForParticipant(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.servicesService.findForParticipant(user.sub, id);
+  }
+
   @Get('me/:id')
   findOneMine(
     @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,

@@ -6,6 +6,8 @@ import {
   Patch,
   BadRequestException,
   UseGuards,
+  Param,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -26,6 +28,12 @@ export class ProfilesController {
   @Get()
   findAll() {
     return this.profilesService.findAll();
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(':id/public')
+  findPublic(@Param('id', ParseUUIDPipe) id: string) {
+    return this.profilesService.findPublic(id);
   }
 
   @Auth()
@@ -68,6 +76,8 @@ export class ProfilesController {
       fullName?: string;
       phone?: string;
       address?: string;
+      city?: string;
+      bio?: string;
     },
   ) {
     return this.profilesService.updatePersonalInfo(user.sub, dto);

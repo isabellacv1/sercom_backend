@@ -1,18 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ServiceAssignmentsService } from './service-assignments.service';
+import { SupabaseService } from '../supabase/supabase.service';
 
 describe('ServiceAssignmentsService', () => {
-  let service: ServiceAssignmentsService;
+  let instance: ServiceAssignmentsService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ServiceAssignmentsService],
+      providers: [
+        ServiceAssignmentsService,
+        { provide: SupabaseService, useValue: {} }
+      ],
     }).compile();
 
-    service = module.get<ServiceAssignmentsService>(ServiceAssignmentsService);
+    instance = module.get<ServiceAssignmentsService>(ServiceAssignmentsService);
   });
 
   it('should be defined', () => {
-    expect(service).toBeDefined();
+    expect(instance).toBeDefined();
   });
 });

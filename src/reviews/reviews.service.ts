@@ -47,10 +47,10 @@ export class ReviewsService {
       );
     }
 
-    const existingReview = await this.supabaseService.client
-      .from('reviews')
+    const existingReview = await this.reviewsTable
       .select('id')
       .eq('service_id', dto.service_id)
+      .or(`reviewer_id.is.null,reviewer_id.eq.${clientId}`)
       .maybeSingle();
 
     if (existingReview.error) {
@@ -61,12 +61,12 @@ export class ReviewsService {
       throw new ConflictException('Este servicio ya fue calificado');
     }
 
-    const insertResponse = await this.supabaseService.client
-      .from('reviews')
+    const insertResponse = await this.reviewsTable
       .insert({
         service_id: dto.service_id,
         client_id: clientId,
         worker_id: service.assigned_worker_id,
+        reviewer_id: clientId,
         rating: dto.rating,
         comment: dto.comment?.trim() || null,
       })
@@ -85,6 +85,18 @@ export class ReviewsService {
       message: 'Calificación registrada exitosamente',
       review: insertResponse.data,
     };
+  }
+
+  /*
+   * La tabla `reviews` guarda ambas direcciones y las distingue con
+   * `reviewer_id` (columna real en la BD, ausente en los tipos generados):
+   *   - cliente → trabajador: reviewer_id = client_id (o NULL en filas viejas)
+   *   - trabajador → cliente: reviewer_id = worker_id
+   * El backend escribía en `worker_client_reviews`, tabla que no existe.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get reviewsTable(): any {
+    return this.supabaseService.client.from('reviews');
   }
 
   async findByServiceForUser(userId: string, serviceId: string) {
@@ -111,12 +123,12 @@ export class ReviewsService {
       throw new ForbiddenException('No tienes acceso a este servicio');
     }
 
-    const reviewResponse = await this.supabaseService.client
-      .from('reviews')
+    const reviewResponse = await this.reviewsTable
       .select(
         'id, service_id, client_id, worker_id, rating, comment, created_at',
       )
       .eq('service_id', serviceId)
+      .or(`reviewer_id.is.null,reviewer_id.eq.${service.client_id}`)
       .maybeSingle();
 
     if (reviewResponse.error) {
@@ -130,12 +142,10 @@ export class ReviewsService {
       !reviewResponse.data;
 
     // Verificar si el técnico ya calificó al cliente
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const workerReviewResponse = await (this.supabaseService.client as any)
-      .from('worker_client_reviews')
+    const workerReviewResponse = await this.reviewsTable
       .select('id')
       .eq('service_id', serviceId)
-      .eq('worker_id', userId)
+      .eq('reviewer_id', service.assigned_worker_id ?? '')
       .maybeSingle();
 
     const canWorkerReview =
@@ -173,13 +183,22 @@ export class ReviewsService {
       throw new BadRequestException('El servicio debe estar completado para calificar');
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const insertResponse = await (this.supabaseService.client as any)
-      .from('worker_client_reviews')
+    const existing = await this.reviewsTable
+      .select('id')
+      .eq('service_id', dto.service_id)
+      .eq('reviewer_id', workerId)
+      .maybeSingle();
+
+    if (existing.data) {
+      throw new ConflictException('Ya calificaste a este cliente');
+    }
+
+    const insertResponse = await this.reviewsTable
       .insert({
         service_id: dto.service_id,
         worker_id: workerId,
         client_id: service.client_id,
+        reviewer_id: workerId,
         rating: dto.rating,
         comment: dto.comment?.trim() || null,
       })
@@ -196,6 +215,32 @@ export class ReviewsService {
     };
   }
 
+  /**
+   * Un cliente puede ver la reputación de un trabajador aunque su perfil no
+   * esté publicado si ese trabajador se postuló o fue asignado a uno de sus
+   * servicios: necesita evaluarlo para decidir.
+   */
+  private async hasWorkedWithRequester(workerId: string, requesterId: string) {
+    const services = await this.supabaseService.client
+      .from('services')
+      .select('id, assigned_worker_id')
+      .eq('client_id', requesterId);
+
+    if (services.error || !services.data?.length) return false;
+    if (services.data.some((s) => s.assigned_worker_id === workerId)) return true;
+
+    const proposals = await this.supabaseService.client
+      .from('proposals')
+      .select('id', { count: 'exact', head: true })
+      .eq('technician_id', workerId)
+      .in(
+        'service_id',
+        services.data.map((s) => s.id),
+      );
+
+    return (proposals.count ?? 0) > 0;
+  }
+
   async findByWorker(workerId: string, requesterId?: string) {
     const isOwner = requesterId === workerId;
 
@@ -210,7 +255,10 @@ export class ReviewsService {
         throw new InternalServerErrorException(profileResponse.error.message);
       }
 
-      if (!profileResponse.data?.is_published) {
+      if (
+        !profileResponse.data?.is_published &&
+        !(await this.hasWorkedWithRequester(workerId, requesterId))
+      ) {
         throw new ForbiddenException(
           'No tienes permiso para ver las calificaciones de este trabajador',
         );
@@ -238,6 +286,8 @@ export class ReviewsService {
       `,
       )
       .eq('worker_id', workerId)
+      // Solo reseñas SOBRE el trabajador (no las que él escribió a clientes).
+      .or(`reviewer_id.is.null,reviewer_id.neq.${workerId}`)
       .order('created_at', { ascending: false });
 
     if (reviewsResponse.error) {
@@ -262,10 +312,10 @@ export class ReviewsService {
   }
 
   private async refreshWorkerRatingAggregates(workerId: string) {
-    const statsResponse = await this.supabaseService.client
-      .from('reviews')
+    const statsResponse = await this.reviewsTable
       .select('rating')
-      .eq('worker_id', workerId);
+      .eq('worker_id', workerId)
+      .or(`reviewer_id.is.null,reviewer_id.neq.${workerId}`);
 
     if (statsResponse.error) {
       throw new InternalServerErrorException(statsResponse.error.message);
@@ -276,7 +326,10 @@ export class ReviewsService {
     const avg =
       count === 0
         ? 0
-        : ratings.reduce((sum, row) => sum + Number(row.rating), 0) / count;
+        : ratings.reduce(
+            (sum: number, row: { rating: number }) => sum + Number(row.rating),
+            0,
+          ) / count;
 
     const updateResponse = await this.supabaseService.client
       .from('profiles')
