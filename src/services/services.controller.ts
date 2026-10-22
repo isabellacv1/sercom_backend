@@ -90,14 +90,6 @@ export class ServicesController {
     return this.servicesService.cancelMission(user.sub, id);
   }
 
-  @Patch(':id/debug/force-paid')
-  forcePaidForTesting(
-    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
-    @Param('id') id: string,
-  ) {
-    return this.servicesService.forcePaidForTesting(user.sub, id);
-  }
-
 
   @Post()
   create(

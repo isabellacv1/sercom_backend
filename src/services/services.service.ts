@@ -1065,68 +1065,6 @@ export class ServicesService {
     };
   }
 
-  /**
-   * Simula un pago retenido (solo desarrollo/demo). En producción permitiría
-   * que un cliente "pague" sin pagar, por eso se bloquea con
-   * NODE_ENV=production o ALLOW_TEST_PAYMENTS=false.
-   */
-  async forcePaidForTesting(clientId: string, serviceId: string) {
-    // Opt-in explícito: sin ALLOW_TEST_PAYMENTS=true cualquier cliente podría
-    // marcar su servicio como pagado sin pasar por Wompi.
-    if (
-      process.env.NODE_ENV === 'production' ||
-      process.env.ALLOW_TEST_PAYMENTS !== 'true'
-    ) {
-      throw new ForbiddenException('Los pagos de prueba están desactivados');
-    }
-
-    const { data: service, error: svcErr } = await this.supabaseService.sb
-      .from('services')
-      .select('*')
-      .eq('id', serviceId)
-      .eq('client_id', clientId)
-      .maybeSingle();
-
-    if (svcErr) throw new InternalServerErrorException(svcErr.message);
-    if (!service) throw new NotFoundException('Misión no encontrada');
-
-    const blocked: ServiceStatus[] = ['cancelled', 'in_progress', 'completed', 'on_the_way'];
-    if (blocked.includes(service.status)) {
-      throw new BadRequestException('No se puede forzar pago en el estado actual de la misión');
-    }
-
-    const { data: existing } = await this.supabaseService.sb
-      .from('payments')
-      .select('id, status')
-      .eq('service_id', serviceId)
-      .eq('client_id', clientId)
-      .maybeSingle();
-
-    if (existing) {
-      await this.supabaseService.sb
-        .from('payments')
-        .update({ status: 'held', updated_at: new Date().toISOString() })
-        .eq('id', existing.id);
-    } else {
-      const amountTotal = service.budget_min ?? 100000;
-      const commissionAmount = Math.round(amountTotal * 0.1);
-      await this.supabaseService.sb.from('payments').insert({
-        service_id: serviceId,
-        client_id: clientId,
-        worker_id: service.assigned_worker_id ?? null,
-        amount_total: amountTotal,
-        commission_amount: commissionAmount,
-        worker_amount: amountTotal - commissionAmount,
-        currency: 'COP',
-        provider: 'test',
-        payment_method: 'test_forced',
-        status: 'held',
-      } as any);
-    }
-
-    return { message: 'Pago forzado a estado "held" para pruebas.' };
-  }
-
   private getRelativeTime(date: Date): string {
     const now = new Date();
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
