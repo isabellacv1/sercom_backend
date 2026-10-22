@@ -612,6 +612,19 @@ export class ProposalsService {
 
     const proposals = (data ?? []) as any[];
 
+    // Servicios donde este técnico ya calificó al cliente (no volver a pedirlo).
+    const serviceIds = proposals.map((p) => p.service_id).filter(Boolean);
+    const { data: myReviews } = serviceIds.length
+      ? await this.supabaseService.sbRaw
+          .from('reviews')
+          .select('service_id')
+          .eq('reviewer_id', technicianId)
+          .in('service_id', serviceIds)
+      : { data: [] as { service_id: string }[] };
+    const reviewedServiceIds = new Set<string>(
+      (myReviews ?? []).map((r: { service_id: string }) => r.service_id),
+    );
+
     return proposals.map((p) => {
       const service = p.services ?? {};
       const category = service.service_categories ?? {};
@@ -666,6 +679,7 @@ export class ProposalsService {
         client_rating_avg: client.rating_avg ?? null,
 
         category_name: category.name ?? null,
+        worker_reviewed: reviewedServiceIds.has(p.service_id),
       };
     });
   }
