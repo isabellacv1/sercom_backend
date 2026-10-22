@@ -721,7 +721,8 @@ export class ServicesService {
         `
         *,
         category:service_categories(id, name, description, icon),
-        service_option:service_options(id, category_id, title, description, specialist_level)
+        service_option:service_options(id, category_id, title, description, specialist_level),
+        payments(status)
       `,
       )
       .eq('client_id', clientId)
@@ -734,8 +735,12 @@ export class ServicesService {
       throw new InternalServerErrorException(error.message);
     }
 
-    return (data ?? []).map((service: any) => ({
+    return (data ?? []).map(({ payments, ...service }: any) => ({
       ...service,
+      // Un pago por servicio; PostgREST lo devuelve como objeto o arreglo.
+      payment_status:
+        (Array.isArray(payments) ? payments[0]?.status : payments?.status) ??
+        null,
       status_label: this.getStatusLabel(service.status),
       escrow_ui_message: this.getEscrowUiMessage(service),
     }));
@@ -1066,9 +1071,11 @@ export class ServicesService {
    * NODE_ENV=production o ALLOW_TEST_PAYMENTS=false.
    */
   async forcePaidForTesting(clientId: string, serviceId: string) {
+    // Opt-in explícito: sin ALLOW_TEST_PAYMENTS=true cualquier cliente podría
+    // marcar su servicio como pagado sin pasar por Wompi.
     if (
       process.env.NODE_ENV === 'production' ||
-      process.env.ALLOW_TEST_PAYMENTS === 'false'
+      process.env.ALLOW_TEST_PAYMENTS !== 'true'
     ) {
       throw new ForbiddenException('Los pagos de prueba están desactivados');
     }

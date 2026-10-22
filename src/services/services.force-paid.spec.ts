@@ -20,4 +20,10 @@ describe('ServicesService.forcePaidForTesting', () => {
     process.env.ALLOW_TEST_PAYMENTS = 'false';
     await expect(service.forcePaidForTesting('c', 's')).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('se bloquea si ALLOW_TEST_PAYMENTS no está definido', async () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.ALLOW_TEST_PAYMENTS;
+    await expect(service.forcePaidForTesting('c', 's')).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
