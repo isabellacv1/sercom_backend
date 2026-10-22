@@ -1,6 +1,6 @@
 import { IsIn, IsOptional, IsString } from 'class-validator';
 
-export class ConfirmMercadoPagoPaymentDto {
+export class ConfirmManualPaymentDto {
   @IsIn(['approved', 'rejected'])
   result: 'approved' | 'rejected';
 

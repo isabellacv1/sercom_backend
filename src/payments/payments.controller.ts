@@ -2,21 +2,20 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   HttpCode,
   Param,
   Post,
-  Query,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PaymentsService } from './payments.service';
-import { CreateMercadoPagoLinkDto } from './dto/create-mercadopago-link.dto';
-import { ConfirmMercadoPagoPaymentDto } from './dto/confirm-mercadopago-payment.dto';
+import { CreateCheckoutDto } from './dto/create-checkout.dto';
+import { ConfirmManualPaymentDto } from './dto/confirm-manual-payment.dto';
 import { ReleasePaymentDto } from './dto/release-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { CompletePayoutDto } from './dto/complete-payout.dto';
+import type { WompiEvent } from './wompi.service';
 
 type JwtUser = { sub: string };
 
@@ -25,7 +24,7 @@ type JwtUser = { sub: string };
  *
  * Payloads de ejemplo:
  *
- * POST /payments/mercadopago/link
+ * POST /payments/checkout
  * { "service_id": "uuid-del-servicio" }
  *
  * GET /payments/service/:serviceId
@@ -33,28 +32,37 @@ type JwtUser = { sub: string };
  * GET /payments/:paymentId/receipt
  * GET /payments/:paymentId/audit
  *
- * PATCH /payments/:paymentId/confirm-mercadopago  (solo admin)
- * { "result": "approved", "provider_reference": "MP-123456", "note": "Verificado en portal" }
+ * POST /payments/:paymentId/confirm-manual  (solo admin)
+ * { "result": "approved", "provider_reference": "WOMPI-123456", "note": "Verificado en portal" }
  *
  * POST /payments/:paymentId/release  (solo admin)
  * { "note": "Servicio completado y confirmado por ambas partes" }
  *
  * POST /payments/:paymentId/refund   (solo admin)
- * { "reason": "Servicio no completado" }
+ * { "reason": "Servicio no completado", "manual_reference": "NEQUI-998877" }
+ *
+ * GET  /payments/admin/payouts        (solo admin) transferencias pendientes
+ * POST /payments/:paymentId/payout    (solo admin)
+ * { "reference": "NEQUI-112233", "method": "nequi" }
  */
 @UseGuards(JwtAuthGuard)
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  // ─── Crear link de pago / Checkout Pro preference ────────────────────────
+  // ─── Crear checkout Wompi ─────────────────────────────────────────────────
 
-  @Post('mercadopago/link')
-  createCheckoutPreference(
-    @CurrentUser() user: JwtUser,
-    @Body() dto: CreateMercadoPagoLinkDto,
-  ) {
-    return this.paymentsService.createCheckoutPreference(user.sub, dto);
+  @Post('checkout')
+  createCheckout(@CurrentUser() user: JwtUser, @Body() dto: CreateCheckoutDto) {
+    return this.paymentsService.createCheckout(user.sub, dto);
+  }
+
+  // ─── Transferencias pendientes a técnicos (admin) ────────────────────────
+  // Debe declararse antes de ':paymentId' para no colisionar con esa ruta.
+
+  @Get('admin/payouts')
+  listPendingPayouts(@CurrentUser() user: JwtUser) {
+    return this.paymentsService.listPendingPayouts(user.sub);
   }
 
   // ─── Wallet y balance del trabajador ─────────────────────────────────────
@@ -105,13 +113,13 @@ export class PaymentsController {
 
   // ─── Acciones de admin ────────────────────────────────────────────────────
 
-  @Post(':paymentId/confirm-mercadopago')
-  confirmMercadoPagoPayment(
+  @Post(':paymentId/confirm-manual')
+  confirmManualPayment(
     @CurrentUser() user: JwtUser,
     @Param('paymentId') paymentId: string,
-    @Body() dto: ConfirmMercadoPagoPaymentDto,
+    @Body() dto: ConfirmManualPaymentDto,
   ) {
-    return this.paymentsService.confirmMercadoPagoPayment(
+    return this.paymentsService.confirmManualPayment(
       user.sub,
       paymentId,
       dto,
@@ -135,34 +143,33 @@ export class PaymentsController {
   ) {
     return this.paymentsService.refundPayment(user.sub, paymentId, dto);
   }
+
+  @Post(':paymentId/payout')
+  completePayout(
+    @CurrentUser() user: JwtUser,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: CompletePayoutDto,
+  ) {
+    return this.paymentsService.completePayout(user.sub, paymentId, dto);
+  }
 }
 
 /**
- * Controlador separado para el webhook de Mercado Pago.
- * NO usa JwtAuthGuard — MP llama directamente este endpoint.
- * La autenticidad se verifica internamente con la firma HMAC-SHA256.
+ * Controlador separado para los eventos de Wompi.
+ * NO usa JwtAuthGuard — Wompi llama directamente este endpoint.
+ * La autenticidad se verifica con el checksum del evento (WOMPI_EVENTS_SECRET)
+ * y reconsultando la transacción en la API de Wompi.
  *
- * Configurar en el portal de MP:
- *   URL: https://tu-dominio.com/payments/webhook/mercadopago
- *   Eventos: Pagos (payment)
+ * Configurar en el dashboard de Wompi → Desarrolladores → URL de eventos:
+ *   https://sercom-backend.onrender.com/payments/webhook/wompi
  */
 @Controller('payments/webhook')
 export class PaymentsWebhookController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
-  @Post('mercadopago')
+  @Post('wompi')
   @HttpCode(200)
-  handleMercadoPagoWebhook(
-    @Headers('x-signature') xSignature: string | undefined,
-    @Headers('x-request-id') xRequestId: string | undefined,
-    @Query() query: Record<string, string>,
-    @Body() body: any,
-  ) {
-    return this.paymentsService.handleWebhook(
-      xSignature,
-      xRequestId,
-      query,
-      body,
-    );
+  handleWompiEvent(@Body() body: WompiEvent) {
+    return this.paymentsService.handleWompiEvent(body);
   }
 }

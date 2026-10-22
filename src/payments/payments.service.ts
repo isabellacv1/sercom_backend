@@ -1,25 +1,26 @@
 import {
+  ServiceUnavailableException,
   BadRequestException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import MercadoPagoConfig, {
-  Payment as MpPayment,
-  Preference,
-  WebhookSignatureValidator,
-} from 'mercadopago';
 import { SupabaseService } from '../supabase/supabase.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
-import { PayoutService } from './payout.service';
-import { MpOAuthService } from '../oauth/mp-oauth.service';
-import { CreateMercadoPagoLinkDto } from './dto/create-mercadopago-link.dto';
-import { ConfirmMercadoPagoPaymentDto } from './dto/confirm-mercadopago-payment.dto';
+import {
+  WompiEvent,
+  WompiService,
+  WompiTransaction,
+} from './wompi.service';
+import { CreateCheckoutDto } from './dto/create-checkout.dto';
+import { ConfirmManualPaymentDto } from './dto/confirm-manual-payment.dto';
 import { ReleasePaymentDto } from './dto/release-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
+import { CompletePayoutDto } from './dto/complete-payout.dto';
 
 type PaymentStatus =
   | 'pending'
@@ -29,46 +30,48 @@ type PaymentStatus =
   | 'failed'
   | 'disbursed';
 
+/**
+ * Pagos con custodia SerCom sobre Wompi.
+ *
+ *   pending ──(Wompi APPROVED)──▶ held ──(ambas partes confirman)──▶ released
+ *      │                           │                                   │
+ *      └─(DECLINED/ERROR)▶ failed  └─(admin)▶ refunded   (admin transfiere)▶ disbursed
+ *
+ * Todo el dinero entra a la cuenta Wompi de SerCom. La transferencia al
+ * técnico es manual: el admin la hace por fuera (Nequi / banco) y la
+ * registra con POST /payments/:id/payout.
+ */
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
-  private readonly mpClient: MercadoPagoConfig;
-  private readonly webhookSecret: string | undefined;
-  private readonly appUrl: string;
   private readonly frontendUrl: string;
 
   constructor(
     private readonly supabaseService: SupabaseService,
     private readonly configService: ConfigService,
     private readonly pushService: PushNotificationsService,
-    private readonly payoutService: PayoutService,
-    private readonly mpOAuthService: MpOAuthService,
+    private readonly wompi: WompiService,
   ) {
-    const accessToken = this.configService.get<string>('MP_ACCESS_TOKEN') ?? '';
-    this.webhookSecret = this.configService.get<string>('MP_WEBHOOK_SECRET');
-    this.appUrl = this.configService.get<string>('APP_URL') ?? '';
     this.frontendUrl =
-      this.configService.get<string>('MP_FRONTEND_URL') ?? this.appUrl;
-
-    if (!accessToken) {
-      this.logger.error(
-        'MP_ACCESS_TOKEN no configurado. Los pagos no funcionarán.',
-      );
-    }
-
-    this.mpClient = new MercadoPagoConfig({ accessToken });
+      this.configService.get<string>('PAYMENTS_FRONTEND_URL') ??
+      this.configService.get<string>('MP_FRONTEND_URL') ??
+      this.configService.get<string>('APP_URL') ??
+      '';
   }
 
   private get db() {
     return this.supabaseService.sbRaw;
   }
 
-  // ─── Crear Checkout Pro (Preference) ────────────────────────────────────────
+  // ─── Crear checkout Wompi ───────────────────────────────────────────────────
 
-  async createCheckoutPreference(
-    clientId: string,
-    dto: CreateMercadoPagoLinkDto,
-  ) {
+  async createCheckout(clientId: string, dto: CreateCheckoutDto) {
+    if (!this.wompi.isConfigured) {
+      throw new ServiceUnavailableException(
+        'Los pagos no están configurados en este servidor.',
+      );
+    }
+
     const service = await this.requireServiceForClient(
       dto.service_id,
       clientId,
@@ -78,7 +81,10 @@ export class PaymentsService {
       throw new BadRequestException('El servicio no tiene técnico asignado');
     }
 
-    const payment = await this.requirePendingPayment(service.id, clientId);
+    let payment = await this.requirePendingPayment(service.id, clientId);
+
+    // Antes de generar otro checkout, verificar si un intento previo ya se pagó.
+    payment = await this.syncWithProvider(payment);
 
     if (payment.status === 'held') {
       const svc = await this.getServiceBasicData(service.id);
@@ -91,12 +97,9 @@ export class PaymentsService {
 
     this.guardFinalStatus(payment.status as PaymentStatus);
 
-    // Reutilizar preference existente si la URL guardada es válida (no sandbox)
-    if (
-      payment.mp_preference_id &&
-      payment.checkout_url &&
-      !payment.checkout_url.includes('sandbox')
-    ) {
+    if (payment.provider_status === 'PENDING' && payment.checkout_url) {
+      // Hay una transacción en curso (p. ej. PSE / Nequi esperando aprobación):
+      // no abrir un segundo cobro.
       return this.buildCheckoutResponse(payment, payment.checkout_url);
     }
 
@@ -106,128 +109,25 @@ export class PaymentsService {
       .eq('id', clientId)
       .maybeSingle();
 
-    this.logger.log(
-      JSON.stringify(
-        {
-          payer: {
-            name: clientProfile?.full_name,
-            email: clientProfile?.email,
-          },
-        },
-        null,
-        2,
-      ),
-    );
-
-    // Verificar si el trabajador tiene OAuth conectado para usar Marketplace Split
-    const workerAccount = await this.mpOAuthService.getWorkerAccount(
-      service.assigned_worker_id,
-    );
-    const useMarketplaceSplit = !!workerAccount;
-
-    let preferenceResult: any;
-
-    try {
-      if (useMarketplaceSplit) {
-        // ── Marketplace Split: usar el token del trabajador ────────────────
-        // El pago se divide automáticamente:
-        //   worker recibe: amount_total - commission_amount
-        //   SerCom recibe: commission_amount (marketplace_fee)
-        // Requiere que la app esté registrada como Marketplace en MP.
-        const workerMpClient = new MercadoPagoConfig({
-          accessToken: workerAccount.mp_access_token,
-        });
-        const workerPreferenceAPI = new Preference(workerMpClient);
-
-        preferenceResult = await workerPreferenceAPI.create({
-          body: {
-            external_reference: payment.id,
-            // marketplace_fee: Number(payment.commission_amount),
-            items: [
-              {
-                id: service.id,
-                title: service.title ?? 'Servicio técnico',
-                description: service.description ?? '',
-                quantity: 1,
-                unit_price: Number(payment.amount_total),
-                currency_id: 'COP',
-              },
-            ],
-            payer: {
-              name: clientProfile?.full_name ?? '',
-              email: clientProfile?.email ?? '',
-            },
-            notification_url: `${this.appUrl}/payments/webhook/mercadopago`,
-            back_urls: {
-              success: `${this.frontendUrl}/payment/success`,
-              failure: `${this.frontendUrl}/payment/failure`,
-              pending: `${this.frontendUrl}/payment/pending`,
-            },
-            auto_return: 'approved',
-            statement_descriptor: 'SerCom',
-            expires: true,
-            expiration_date_from: new Date().toISOString(),
-            expiration_date_to: new Date(
-              Date.now() + 48 * 60 * 60 * 1000,
-            ).toISOString(),
-          },
-        });
-
-        this.logger.log(
-          `Marketplace split activado para pago ${payment.id}. Worker MP: ${workerAccount.mp_user_id}`,
-        );
-      } else {
-        // ── Flujo estándar: todo entra a cuenta SerCom, payout manual después ─
-        const preferenceAPI = new Preference(this.mpClient);
-        preferenceResult = await preferenceAPI.create({
-          body: {
-            external_reference: payment.id,
-            items: [
-              {
-                id: service.id,
-                title: service.title ?? 'Servicio técnico',
-                description: service.description ?? '',
-                quantity: 1,
-                unit_price: Number(payment.amount_total),
-                currency_id: 'COP',
-              },
-            ],
-            payer: { name: clientProfile?.full_name ?? '' },
-            notification_url: `${this.appUrl}/payments/webhook/mercadopago`,
-            back_urls: {
-              success: `${this.frontendUrl}/payment/success`,
-              failure: `${this.frontendUrl}/payment/failure`,
-              pending: `${this.frontendUrl}/payment/pending`,
-            },
-            auto_return: 'approved',
-            statement_descriptor: 'SerCom',
-            expires: true,
-            expiration_date_from: new Date().toISOString(),
-            expiration_date_to: new Date(
-              Date.now() + 48 * 60 * 60 * 1000,
-            ).toISOString(),
-          },
-        });
-      }
-    } catch (err) {
-      this.logger.error(
-        `Error creando preference MP: ${(err as Error).message}`,
-      );
-      throw new InternalServerErrorException(
-        'No se pudo generar el link de pago. Intenta nuevamente.',
-      );
-    }
-
-    const checkoutUrl: string = preferenceResult.init_point;
+    // Wompi exige referencia única por transacción: cada intento usa una nueva.
+    const reference = `${payment.id}_${Date.now().toString(36)}`;
+    const checkoutUrl = this.wompi.buildCheckoutUrl({
+      reference,
+      amountInCents: this.toCents(payment.amount_total),
+      currency: payment.currency ?? 'COP',
+      redirectUrl: this.frontendUrl || 'https://sercom-frontend.vercel.app',
+      customerEmail: clientProfile?.email,
+      customerName: clientProfile?.full_name,
+    });
 
     const { data: updated, error: updateError } = await this.db
       .from('payments')
       .update({
-        mp_preference_id: preferenceResult.id,
+        checkout_reference: reference,
         checkout_url: checkoutUrl,
-        provider: 'mercadopago',
-        payment_method: dto.payment_method ?? 'mercadopago_checkout',
-        payment_mode: useMarketplaceSplit ? 'marketplace' : 'platform',
+        provider: 'wompi',
+        payment_method: 'wompi_checkout',
+        payment_mode: 'platform',
         updated_at: new Date().toISOString(),
       })
       .eq('id', payment.id)
@@ -243,8 +143,8 @@ export class PaymentsService {
       new_status: payment.status,
       source: 'client',
       changed_by: clientId,
-      note: `Preference MP creada: ${preferenceResult.id}`,
-      metadata: { mp_preference_id: preferenceResult.id },
+      note: `Checkout Wompi generado: ${reference}`,
+      metadata: { checkout_reference: reference, sandbox: this.wompi.isSandbox },
     });
 
     return this.buildCheckoutResponse(updated, checkoutUrl);
@@ -253,66 +153,51 @@ export class PaymentsService {
   // ─── Consultar pago por servicio ────────────────────────────────────────────
 
   async findByService(userId: string, serviceId: string) {
-    const { data: payment, error } = await this.db
+    const { data, error } = await this.db
       .from('payments')
       .select('*')
       .eq('service_id', serviceId)
       .maybeSingle();
 
     if (error) throw new InternalServerErrorException(error.message);
-    if (!payment) throw new NotFoundException('Pago no encontrado');
+    if (!data) throw new NotFoundException('Pago no encontrado');
 
-    await this.requireParticipantOrAdmin(userId, payment);
+    await this.requireParticipantOrAdmin(userId, data);
+
+    // Respaldo del webhook: si el pago sigue pendiente, consultar a Wompi.
+    const payment = await this.syncWithProvider(data);
 
     const service = await this.getServiceBasicData(serviceId);
     return {
       payment,
-      receipt:
-        payment.status === 'held' || payment.status === 'released'
-          ? this.buildReceipt(payment, service)
-          : null,
+      receipt: this.hasReceipt(payment)
+        ? this.buildReceipt(payment, service)
+        : null,
     };
   }
 
   // ─── Consultar pago por ID ──────────────────────────────────────────────────
 
   async findById(userId: string, paymentId: string) {
-    const { data: payment, error } = await this.db
-      .from('payments')
-      .select('*')
-      .eq('id', paymentId)
-      .maybeSingle();
-
-    if (error) throw new InternalServerErrorException(error.message);
-    if (!payment) throw new NotFoundException('Pago no encontrado');
-
+    const payment = await this.requirePayment(paymentId);
     await this.requireParticipantOrAdmin(userId, payment);
 
     const service = await this.getServiceBasicData(payment.service_id);
     return {
       payment,
-      receipt:
-        payment.status === 'held' || payment.status === 'released'
-          ? this.buildReceipt(payment, service)
-          : null,
+      receipt: this.hasReceipt(payment)
+        ? this.buildReceipt(payment, service)
+        : null,
     };
   }
 
   // ─── Obtener comprobante digital ────────────────────────────────────────────
 
   async getReceipt(userId: string, paymentId: string) {
-    const { data: payment, error } = await this.db
-      .from('payments')
-      .select('*')
-      .eq('id', paymentId)
-      .maybeSingle();
-
-    if (error) throw new InternalServerErrorException(error.message);
-    if (!payment) throw new NotFoundException('Pago no encontrado');
-
+    const payment = await this.requirePayment(paymentId);
     await this.requireParticipantOrAdmin(userId, payment);
 
-    if (payment.status !== 'held' && payment.status !== 'released') {
+    if (!this.hasReceipt(payment)) {
       throw new BadRequestException(
         'El comprobante solo está disponible para pagos aprobados o liberados',
       );
@@ -324,35 +209,22 @@ export class PaymentsService {
 
   // ─── Confirmación manual por admin ──────────────────────────────────────────
 
-  async confirmMercadoPagoPayment(
+  async confirmManualPayment(
     userId: string,
     paymentId: string,
-    dto: ConfirmMercadoPagoPaymentDto,
+    dto: ConfirmManualPaymentDto,
   ) {
-    if (!(await this.isAdmin(userId))) {
-      throw new ForbiddenException(
-        'Solo un administrador puede confirmar pagos manualmente',
-      );
-    }
+    await this.requireAdmin(
+      userId,
+      'Solo un administrador puede confirmar pagos manualmente',
+    );
 
-    const { data: payment, error } = await this.db
-      .from('payments')
-      .select('*')
-      .eq('id', paymentId)
-      .maybeSingle();
-
-    if (error) throw new InternalServerErrorException(error.message);
-    if (!payment) throw new NotFoundException('Pago no encontrado');
-
+    const payment = await this.requirePayment(paymentId);
     const status = payment.status as PaymentStatus;
+
     if (status === 'held') {
       throw new BadRequestException(
         'Este pago ya fue confirmado anteriormente',
-      );
-    }
-    if (status === 'failed') {
-      throw new BadRequestException(
-        'Este pago fue rechazado. Solicita un nuevo pago al cliente.',
       );
     }
     this.guardFinalStatus(status);
@@ -389,7 +261,7 @@ export class PaymentsService {
       };
     }
 
-    const receiptNumber = `MP-${paymentId}`;
+    const receiptNumber = this.receiptNumberFor(paymentId);
     const { data: held, error: heldErr } = await this.db
       .from('payments')
       .update({
@@ -415,15 +287,7 @@ export class PaymentsService {
       metadata: { provider_reference: dto.provider_reference },
     });
 
-    await this.notifyWorkerPaymentGuaranteed(held.worker_id);
-
-    if (held.client_id) {
-      await this.pushService.sendToUser(held.client_id, {
-        title: 'Pago recibido',
-        body: 'Tu pago fue procesado y queda bajo custodia de la plataforma.',
-        data: { payment_id: paymentId, type: 'payment_held' },
-      });
-    }
+    await this.notifyPaymentHeld(held);
 
     const service = await this.getServiceBasicData(held.service_id);
     return {
@@ -434,86 +298,43 @@ export class PaymentsService {
     };
   }
 
-  // ─── Webhook automático de Mercado Pago ─────────────────────────────────────
+  // ─── Webhook (eventos) de Wompi ─────────────────────────────────────────────
 
-  async handleWebhook(
-    xSignature: string | undefined,
-    xRequestId: string | undefined,
-    query: Record<string, string>,
-    body: any,
-  ) {
-    if (this.webhookSecret) {
-      WebhookSignatureValidator.validate({
-        xSignature: xSignature ?? '',
-        xRequestId: xRequestId ?? '',
-        dataId: query['data.id'] ?? body?.data?.id ?? '',
-        secret: this.webhookSecret,
-        toleranceSeconds: 300,
-      });
+  async handleWompiEvent(event: WompiEvent) {
+    const signatureValid = this.wompi.verifyEventSignature(event);
+    if (signatureValid === false) {
+      this.logger.warn('Evento Wompi con firma inválida, descartado');
+      throw new UnauthorizedException('Firma inválida');
     }
 
-    if (body?.type !== 'payment' && body?.action !== 'payment.updated') {
+    if (event?.event !== 'transaction.updated') {
       return { received: true };
     }
 
-    const mpPaymentId: string | undefined =
-      query['data.id'] ?? body?.data?.id?.toString();
-
-    if (!mpPaymentId) {
-      this.logger.warn('Webhook MP recibido sin data.id');
+    const transactionId = event.data?.transaction?.id;
+    if (!transactionId) {
+      this.logger.warn('Evento Wompi sin transaction.id');
       return { received: true };
     }
 
-    let mpPaymentData: any;
+    // La fuente de verdad es la API, no el cuerpo del evento.
+    let transaction: WompiTransaction;
     try {
-      const paymentAPI = new MpPayment(this.mpClient);
-      mpPaymentData = await paymentAPI.get({ id: mpPaymentId });
+      transaction = await this.wompi.getTransaction(transactionId);
     } catch (err) {
       this.logger.error(
-        `Error consultando pago MP ${mpPaymentId}: ${(err as Error).message}`,
+        `Error consultando transacción Wompi ${transactionId}: ${(err as Error).message}`,
       );
-      return { received: true };
+      // 5xx para que Wompi reintente el evento.
+      throw new ServiceUnavailableException('No se pudo verificar la transacción');
     }
 
-    const externalRef: string | undefined = mpPaymentData?.external_reference;
-    if (!externalRef) {
-      this.logger.warn(`Pago MP ${mpPaymentId} sin external_reference`);
-      return { received: true };
-    }
-
-    const { data: payment, error: findErr } = await this.db
-      .from('payments')
-      .select('*')
-      .eq('id', externalRef)
-      .maybeSingle();
-
-    if (findErr || !payment) {
+    const paymentId = this.paymentIdFromReference(transaction.reference);
+    if (!paymentId) {
       this.logger.warn(
-        `Pago MP ${mpPaymentId} con external_reference=${externalRef} no encontrado`,
+        `Transacción Wompi ${transaction.id} con referencia desconocida: ${transaction.reference}`,
       );
       return { received: true };
-    }
-
-    // Idempotencia: no reprocesar el mismo evento
-    if (payment.mp_payment_id === mpPaymentId) {
-      return { received: true };
-    }
-
-    await this.processMpPaymentStatus(payment, mpPaymentData);
-    return { received: true };
-  }
-
-  // ─── Liberar fondos al técnico (post-servicio completado) ───────────────────
-
-  async releasePayment(
-    userId: string,
-    paymentId: string,
-    dto: ReleasePaymentDto,
-  ) {
-    if (!(await this.isAdmin(userId))) {
-      throw new ForbiddenException(
-        'Solo un administrador puede liberar fondos',
-      );
     }
 
     const { data: payment, error } = await this.db
@@ -523,7 +344,27 @@ export class PaymentsService {
       .maybeSingle();
 
     if (error) throw new InternalServerErrorException(error.message);
-    if (!payment) throw new NotFoundException('Pago no encontrado');
+    if (!payment) {
+      this.logger.warn(
+        `Transacción Wompi ${transaction.id}: pago ${paymentId} no encontrado`,
+      );
+      return { received: true };
+    }
+
+    await this.applyTransaction(payment, transaction, 'webhook');
+    return { received: true };
+  }
+
+  // ─── Liberar fondos (admin, manual) ─────────────────────────────────────────
+
+  async releasePayment(
+    userId: string,
+    paymentId: string,
+    dto: ReleasePaymentDto,
+  ) {
+    await this.requireAdmin(userId, 'Solo un administrador puede liberar fondos');
+
+    const payment = await this.requirePayment(paymentId);
 
     if (payment.status !== 'held') {
       throw new BadRequestException(
@@ -549,49 +390,174 @@ export class PaymentsService {
       );
     }
 
-    const now = new Date().toISOString();
-    const { data: released, error: releaseErr } = await this.db
-      .from('payments')
-      .update({ status: 'released', released_at: now, updated_at: now })
-      .eq('id', paymentId)
-      .select()
-      .single();
-
-    if (releaseErr) throw new InternalServerErrorException(releaseErr.message);
-
-    await this.logAudit({
-      payment_id: paymentId,
-      previous_status: 'held',
-      new_status: 'released',
+    const released = await this.markReleased(payment, {
       source: 'admin',
-      changed_by: userId,
-      note:
-        dto.note ?? 'Fondos liberados al técnico tras completar el servicio',
+      changedBy: userId,
+      note: dto.note,
     });
 
     const svc = await this.getServiceBasicData(released.service_id);
+    return {
+      message:
+        'Fondos liberados. Queda pendiente la transferencia al técnico.',
+      payment: released,
+      receipt: this.buildReceipt(released, svc),
+    };
+  }
 
-    // HU26: notificación al trabajador (monto + servicio)
+  /**
+   * Se dispara cuando cliente y técnico confirman el servicio
+   * (ServicesService). Libera la custodia y deja el pago listo para que el
+   * admin transfiera al técnico.
+   */
+  async disburseWorkerPayment(serviceId: string): Promise<void> {
+    const { data: payment, error } = await this.db
+      .from('payments')
+      .select('*')
+      .eq('service_id', serviceId)
+      .eq('status', 'held')
+      .maybeSingle();
+
+    if (error) {
+      this.logger.error(
+        `Error buscando pago held para servicio ${serviceId}: ${error.message}`,
+      );
+      return;
+    }
+    if (!payment) {
+      this.logger.warn(
+        `No se encontró pago en estado 'held' para servicio ${serviceId}`,
+      );
+      return;
+    }
+
+    await this.markReleased(payment, {
+      source: 'system',
+      note: 'Ambas partes confirmaron el servicio',
+    });
+  }
+
+  // ─── Transferencias a técnicos (admin) ──────────────────────────────────────
+
+  async listPendingPayouts(userId: string) {
+    await this.requireAdmin(
+      userId,
+      'Solo un administrador puede ver las transferencias pendientes',
+    );
+
+    const { data: rows, error } = await this.db
+      .from('payments')
+      .select(
+        `
+        id, service_id, worker_id, worker_amount, commission_amount,
+        amount_total, currency, released_at, payout_status,
+        services:service_id(title)
+      `,
+      )
+      .eq('status', 'released')
+      .eq('payout_status', 'pending_manual')
+      .order('released_at', { ascending: true });
+
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const workerIds = [
+      ...new Set((rows ?? []).map((r) => r.worker_id).filter(Boolean)),
+    ];
+    const { data: workers } = workerIds.length
+      ? await this.db
+          .from('profiles')
+          .select('id, full_name, email, phone')
+          .in('id', workerIds)
+      : { data: [] as any[] };
+    const workerById = new Map((workers ?? []).map((w) => [w.id, w]));
+
+    const payouts = (rows ?? []).map((r) => {
+      const worker = workerById.get(r.worker_id);
+      return {
+        payment_id: r.id,
+        service_id: r.service_id,
+        service_title: (r.services as any)?.title ?? null,
+        worker_id: r.worker_id,
+        worker_name: worker?.full_name ?? null,
+        worker_email: worker?.email ?? null,
+        worker_phone: worker?.phone ?? null,
+        worker_amount: Number(r.worker_amount ?? 0),
+        commission_amount: Number(r.commission_amount ?? 0),
+        amount_total: Number(r.amount_total ?? 0),
+        currency: r.currency ?? 'COP',
+        released_at: r.released_at,
+      };
+    });
+
+    return {
+      total_pending: payouts.reduce((s, p) => s + p.worker_amount, 0),
+      payouts,
+    };
+  }
+
+  async completePayout(
+    userId: string,
+    paymentId: string,
+    dto: CompletePayoutDto,
+  ) {
+    await this.requireAdmin(
+      userId,
+      'Solo un administrador puede registrar transferencias',
+    );
+
+    const payment = await this.requirePayment(paymentId);
+
+    if (payment.status === 'disbursed') {
+      throw new BadRequestException('Este pago ya fue transferido al técnico');
+    }
+    if (payment.status !== 'released') {
+      throw new BadRequestException(
+        `Solo se puede transferir un pago liberado. Estado actual: ${payment.status}`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const { data: disbursed, error } = await this.db
+      .from('payments')
+      .update({
+        status: 'disbursed',
+        payout_status: 'completed',
+        disbursed_at: now,
+        external_transfer_id: dto.reference,
+        payout_attempts: (payment.payout_attempts ?? 0) + 1,
+        payout_error: null,
+        updated_at: now,
+      })
+      .eq('id', paymentId)
+      .eq('status', 'released')
+      .select()
+      .single();
+
+    if (error) throw new InternalServerErrorException(error.message);
+
+    await this.logAudit({
+      payment_id: paymentId,
+      previous_status: 'released',
+      new_status: 'disbursed',
+      source: 'admin',
+      changed_by: userId,
+      note: dto.note ?? `Transferencia manual al técnico: ${dto.reference}`,
+      metadata: { reference: dto.reference, method: dto.method ?? null },
+    });
+
+    const svc = await this.getServiceBasicData(disbursed.service_id);
     await this.notifyWorkerPaymentDeposited({
-      workerId: released.worker_id,
+      workerId: disbursed.worker_id,
       paymentId,
-      serviceId: released.service_id,
-      workerAmount: Number(released.worker_amount),
-      dataType: 'payment_released',
+      serviceId: disbursed.service_id,
+      workerAmount: Number(disbursed.worker_amount),
+      dataType: 'payment_disbursed',
       serviceTitle: svc?.title ?? null,
     });
 
-    if (released.client_id) {
-      await this.pushService.sendToUser(released.client_id, {
-        title: 'Servicio finalizado',
-        body: 'El pago fue liberado al técnico. ¡Gracias por usar SerCom!',
-        data: { payment_id: paymentId, type: 'payment_released' },
-      });
-    }
     return {
-      message: 'Fondos liberados al técnico correctamente.',
-      payment: released,
-      receipt: this.buildReceipt(released, svc),
+      message: 'Transferencia registrada. El técnico fue notificado.',
+      payment: disbursed,
     };
   }
 
@@ -602,20 +568,9 @@ export class PaymentsService {
     paymentId: string,
     dto: RefundPaymentDto,
   ) {
-    if (!(await this.isAdmin(userId))) {
-      throw new ForbiddenException(
-        'Solo un administrador puede emitir reembolsos',
-      );
-    }
+    await this.requireAdmin(userId, 'Solo un administrador puede emitir reembolsos');
 
-    const { data: payment, error } = await this.db
-      .from('payments')
-      .select('*')
-      .eq('id', paymentId)
-      .maybeSingle();
-
-    if (error) throw new InternalServerErrorException(error.message);
-    if (!payment) throw new NotFoundException('Pago no encontrado');
+    const payment = await this.requirePayment(paymentId);
 
     if (payment.status !== 'held' && payment.status !== 'pending') {
       throw new BadRequestException(
@@ -623,14 +578,29 @@ export class PaymentsService {
       );
     }
 
-    if (payment.mp_payment_id) {
-      try {
-        const { PaymentRefund } = await import('mercadopago');
-        const refundAPI = new PaymentRefund(this.mpClient);
-        await refundAPI.create({ payment_id: payment.mp_payment_id, body: {} });
-      } catch (err) {
-        this.logger.error(
-          `Error al reembolsar en MP payment_id=${payment.mp_payment_id}: ${(err as Error).message}`,
+    let refundReference: string | null = dto.manual_reference ?? null;
+
+    if (payment.status === 'held' && !refundReference) {
+      // Wompi solo permite anular pagos con tarjeta; Nequi, PSE, Bancolombia,
+      // etc. se devuelven por transferencia y se registran con manual_reference.
+      if (
+        payment.provider_transaction_id &&
+        payment.provider_payment_method === 'CARD'
+      ) {
+        try {
+          await this.wompi.voidTransaction(payment.provider_transaction_id);
+          refundReference = `VOID-${payment.provider_transaction_id}`;
+        } catch (err) {
+          this.logger.error(
+            `Error anulando transacción Wompi ${payment.provider_transaction_id}: ${(err as Error).message}`,
+          );
+          throw new BadRequestException(
+            'Wompi no permitió anular el pago. Devuelve el dinero por transferencia y registra el reembolso con manual_reference.',
+          );
+        }
+      } else {
+        throw new BadRequestException(
+          'Este medio de pago no admite anulación automática. Devuelve el dinero al cliente por transferencia y registra el reembolso con manual_reference.',
         );
       }
     }
@@ -638,7 +608,12 @@ export class PaymentsService {
     const now = new Date().toISOString();
     const { data: refunded, error: refundErr } = await this.db
       .from('payments')
-      .update({ status: 'refunded', refunded_at: now, updated_at: now })
+      .update({
+        status: 'refunded',
+        refunded_at: now,
+        refund_reference: refundReference,
+        updated_at: now,
+      })
       .eq('id', paymentId)
       .select()
       .single();
@@ -652,13 +627,16 @@ export class PaymentsService {
       source: 'admin',
       changed_by: userId,
       note: dto.reason ?? 'Reembolso emitido por administrador',
-      metadata: { mp_payment_id: payment.mp_payment_id },
+      metadata: {
+        provider_transaction_id: payment.provider_transaction_id,
+        refund_reference: refundReference,
+      },
     });
 
-    if (refunded.client_id) {
+    if (refunded.client_id && payment.status === 'held') {
       await this.pushService.sendToUser(refunded.client_id, {
         title: 'Reembolso procesado',
-        body: `Tu pago de $${Number(refunded.amount_total).toLocaleString('es-CO')} COP ha sido reembolsado.`,
+        body: `Tu pago de ${this.formatCop(refunded.amount_total)} ha sido reembolsado.`,
         data: { payment_id: paymentId, type: 'payment_refunded' },
       });
     }
@@ -690,89 +668,345 @@ export class PaymentsService {
     return { logs: logs ?? [] };
   }
 
-  // ─── Procesar estado MP y actualizar DB ─────────────────────────────────────
+  // ─── Wallet completo del trabajador ────────────────────────────────────────
 
-  private async processMpPaymentStatus(payment: any, mpData: any) {
-    const mpStatus: string = mpData.status ?? '';
-    const mpStatusDetail: string = mpData.status_detail ?? '';
-    const mpPaymentId: string = mpData.id?.toString() ?? '';
+  async getWorkerWallet(workerId: string) {
+    const { data: payments, error } = await this.db
+      .from('payments')
+      .select(
+        `
+        id, service_id, status, payout_status, payment_mode,
+        worker_amount, commission_amount, amount_total, currency,
+        created_at, paid_at, disbursed_at, external_transfer_id,
+        services:service_id(title, scheduled_at, address)
+      `,
+      )
+      .eq('worker_id', workerId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const rows = payments ?? [];
+    const sum = (filter: (p: (typeof rows)[number]) => boolean) =>
+      rows.filter(filter).reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
+
+    const transactions = rows.map((p) => ({
+      id: p.id,
+      service_id: p.service_id,
+      service_title: (p.services as any)?.title ?? null,
+      service_address: (p.services as any)?.address ?? null,
+      scheduled_at: (p.services as any)?.scheduled_at ?? null,
+      worker_amount: Number(p.worker_amount ?? 0),
+      commission_amount: Number(p.commission_amount ?? 0),
+      total_amount: Number(p.amount_total ?? 0),
+      currency: p.currency ?? 'COP',
+      status: p.status,
+      payout_status: p.payout_status,
+      payment_mode: p.payment_mode,
+      external_transfer_id: p.external_transfer_id ?? null,
+      created_at: p.created_at,
+      paid_at: p.paid_at,
+      disbursed_at: p.disbursed_at,
+    }));
+
+    return {
+      // En custodia: el cliente pagó, el servicio aún no se confirma.
+      processing_balance: sum((p) => p.status === 'held'),
+      // Liberado y pendiente de que SerCom lo transfiera.
+      available_balance: sum((p) => p.status === 'released'),
+      pending_manual_total: sum((p) => p.status === 'released'),
+      paid_out_total: sum((p) => p.status === 'disbursed'),
+      marketplace_enabled: false,
+      transactions,
+    };
+  }
+
+  // ─── Balance del trabajador ─────────────────────────────────────────────────
+
+  async getWorkerBalance(workerId: string) {
+    const { data: payments, error } = await this.db
+      .from('payments')
+      .select('status, worker_amount')
+      .eq('worker_id', workerId);
+
+    if (error) throw new InternalServerErrorException(error.message);
+
+    const rows = payments ?? [];
+    const sum = (status: PaymentStatus) =>
+      rows
+        .filter((p) => p.status === status)
+        .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
+
+    return {
+      available: sum('released'),
+      in_escrow: sum('held'),
+      total_paid: sum('disbursed'),
+    };
+  }
+
+  // ─── Aplicar estado de una transacción Wompi ────────────────────────────────
+
+  /**
+   * Idempotente: se puede llamar varias veces con la misma transacción
+   * (webhook + polling del frontend). Solo avanza estados válidos.
+   */
+  private async applyTransaction(
+    payment: any,
+    tx: WompiTransaction,
+    source: 'webhook' | 'system',
+  ): Promise<any> {
+    const current = payment.status as PaymentStatus;
     const now = new Date().toISOString();
 
-    let newStatus: PaymentStatus | null = null;
+    const isSameTx = payment.provider_transaction_id === tx.id;
+    if (isSameTx && payment.provider_status === tx.status) {
+      return payment;
+    }
 
-    if (mpStatus === 'approved') {
-      newStatus = 'held';
-    } else if (
-      mpStatus === 'rejected' ||
-      mpStatus === 'cancelled' ||
-      mpStatus === 'charged_back'
-    ) {
-      newStatus = 'failed';
-    } else {
-      // pending / in_process / authorized — actualizar metadatos sin cambiar status
-      await this.db
+    if (tx.status === 'APPROVED') {
+      const expectedCents = this.toCents(payment.amount_total);
+      if (
+        tx.amount_in_cents !== expectedCents ||
+        (tx.currency ?? 'COP') !== (payment.currency ?? 'COP')
+      ) {
+        this.logger.error(
+          `Transacción ${tx.id} aprobada con monto ${tx.amount_in_cents} ${tx.currency}, se esperaba ${expectedCents} ${payment.currency}`,
+        );
+        await this.logAudit({
+          payment_id: payment.id,
+          previous_status: current,
+          new_status: current,
+          source,
+          note: `ALERTA: transacción Wompi ${tx.id} aprobada con monto distinto. Revisar y reembolsar.`,
+          metadata: { transaction: tx },
+        });
+        return payment;
+      }
+
+      if (current !== 'pending' && current !== 'failed') {
+        if (!isSameTx) {
+          // Cobro duplicado (p. ej. el cliente pagó en dos pestañas).
+          await this.logAudit({
+            payment_id: payment.id,
+            previous_status: current,
+            new_status: current,
+            source,
+            note: `ALERTA: cobro duplicado, transacción Wompi ${tx.id} aprobada sobre un pago ya ${current}. Reembolsar al cliente.`,
+            metadata: { transaction: tx },
+          });
+        }
+        return payment;
+      }
+
+      const { data: held, error } = await this.db
         .from('payments')
         .update({
-          mp_payment_id: mpPaymentId,
-          mp_status: mpStatus,
-          mp_status_detail: mpStatusDetail,
+          status: 'held',
+          paid_at: tx.finalized_at ?? now,
+          receipt_number: this.receiptNumberFor(payment.id),
+          provider: 'wompi',
+          provider_reference: tx.id,
+          provider_transaction_id: tx.id,
+          provider_status: tx.status,
+          provider_status_detail: tx.status_message ?? null,
+          provider_payment_method: tx.payment_method_type ?? null,
           updated_at: now,
         })
-        .eq('id', payment.id);
-      return;
+        .eq('id', payment.id)
+        .in('status', ['pending', 'failed'])
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        this.logger.error(
+          `Error marcando pago ${payment.id} como held: ${error.message}`,
+        );
+        throw new InternalServerErrorException(error.message);
+      }
+      if (!held) return payment; // otro proceso ya lo actualizó
+
+      await this.logAudit({
+        payment_id: payment.id,
+        previous_status: current,
+        new_status: 'held',
+        source,
+        note: `Wompi APPROVED (${tx.payment_method_type ?? 'N/A'})`,
+        metadata: { transaction_id: tx.id, reference: tx.reference },
+      });
+
+      await this.notifyPaymentHeld(held);
+      return held;
     }
 
-    if (newStatus === payment.status) return;
-
-    const updatePayload: Record<string, any> = {
-      status: newStatus,
-      mp_payment_id: mpPaymentId,
-      mp_status: mpStatus,
-      mp_status_detail: mpStatusDetail,
-      provider_reference: mpPaymentId,
-      updated_at: now,
-    };
-
-    if (newStatus === 'held') {
-      updatePayload.paid_at = now;
-      updatePayload.receipt_number = `MP-${payment.id}`;
+    // PENDING / DECLINED / ERROR / VOIDED
+    if (current !== 'pending') {
+      // Un pago ya resuelto no retrocede por un intento posterior/anterior.
+      return payment;
     }
 
-    const { error } = await this.db
+    const becomesFailed =
+      tx.status === 'DECLINED' || tx.status === 'ERROR' || tx.status === 'VOIDED';
+
+    const { data: updated, error } = await this.db
       .from('payments')
-      .update(updatePayload)
-      .eq('id', payment.id);
+      .update({
+        ...(becomesFailed ? { status: 'failed' } : {}),
+        provider_transaction_id: tx.id,
+        provider_status: tx.status,
+        provider_status_detail: tx.status_message ?? null,
+        provider_payment_method: tx.payment_method_type ?? null,
+        updated_at: now,
+      })
+      .eq('id', payment.id)
+      .eq('status', 'pending')
+      .select()
+      .maybeSingle();
 
     if (error) {
       this.logger.error(
-        `Error actualizando pago ${payment.id} desde webhook: ${error.message}`,
+        `Error actualizando pago ${payment.id} (${tx.status}): ${error.message}`,
       );
-      return;
+      throw new InternalServerErrorException(error.message);
+    }
+
+    if (becomesFailed) {
+      await this.logAudit({
+        payment_id: payment.id,
+        previous_status: 'pending',
+        new_status: 'failed',
+        source,
+        note: `Wompi ${tx.status}: ${tx.status_message ?? ''}`.trim(),
+        metadata: { transaction_id: tx.id, reference: tx.reference },
+      });
+    }
+
+    return updated ?? payment;
+  }
+
+  /** Consulta a Wompi el último intento de un pago pendiente. Nunca lanza. */
+  private async syncWithProvider(payment: any): Promise<any> {
+    if (
+      payment.status !== 'pending' ||
+      !payment.checkout_reference ||
+      !this.wompi.isConfigured
+    ) {
+      return payment;
+    }
+
+    try {
+      const transactions = await this.wompi.findTransactionsByReference(
+        payment.checkout_reference,
+      );
+      if (!transactions.length) return payment;
+
+      const tx =
+        transactions.find((t) => t.status === 'APPROVED') ??
+        transactions.find((t) => t.status === 'PENDING') ??
+        transactions[0];
+
+      return await this.applyTransaction(payment, tx, 'system');
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo sincronizar pago ${payment.id} con Wompi: ${(err as Error).message}`,
+      );
+      return payment;
+    }
+  }
+
+  private async markReleased(
+    payment: any,
+    opts: { source: 'admin' | 'system'; changedBy?: string; note?: string },
+  ) {
+    const now = new Date().toISOString();
+    const { data: released, error } = await this.db
+      .from('payments')
+      .update({
+        status: 'released',
+        released_at: now,
+        payout_status: 'pending_manual',
+        updated_at: now,
+      })
+      .eq('id', payment.id)
+      .eq('status', 'held')
+      .select()
+      .maybeSingle();
+
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!released) {
+      throw new BadRequestException('El pago ya no está en custodia');
     }
 
     await this.logAudit({
       payment_id: payment.id,
-      previous_status: payment.status,
-      new_status: newStatus,
-      source: 'webhook',
-      mp_payment_id: mpPaymentId,
-      note: `Webhook MP: ${mpStatus} / ${mpStatusDetail}`,
-      metadata: { mp_status: mpStatus, mp_status_detail: mpStatusDetail },
+      previous_status: 'held',
+      new_status: 'released',
+      source: opts.source,
+      changed_by: opts.changedBy ?? null,
+      note:
+        opts.note ??
+        'Custodia liberada. Pendiente transferencia manual al técnico.',
     });
 
-    if (newStatus === 'held') {
-      await this.notifyWorkerPaymentGuaranteed(payment.worker_id);
-      if (payment.client_id) {
-        await this.pushService.sendToUser(payment.client_id, {
-          title: 'Pago recibido',
-          body: 'Tu pago fue procesado y queda bajo custodia de la plataforma.',
-          data: { payment_id: payment.id, type: 'payment_held' },
-        });
-      }
+    const svc = await this.getServiceBasicData(released.service_id);
+    const label = svc?.title?.trim() || 'tu servicio';
+
+    if (released.worker_id) {
+      await this.pushService.sendToUser(released.worker_id, {
+        title: 'Pago liberado',
+        body: `Liberamos ${this.formatCop(released.worker_amount)} por «${label}». SerCom te lo transferirá en un plazo máximo de 2 días hábiles.`,
+        data: {
+          type: 'payment_released',
+          payment_id: String(released.id),
+          service_id: String(released.service_id),
+        },
+      });
     }
+
+    if (released.client_id) {
+      await this.pushService.sendToUser(released.client_id, {
+        title: 'Servicio finalizado',
+        body: 'El pago fue liberado al técnico. ¡Gracias por usar SerCom!',
+        data: { payment_id: released.id, type: 'service_completed' },
+      });
+    }
+
+    return released;
   }
 
   // ─── Helpers privados ───────────────────────────────────────────────────────
+
+  private paymentIdFromReference(reference: string | undefined) {
+    const id = reference?.split('_')[0] ?? '';
+    return /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+  }
+
+  private toCents(amount: number | string) {
+    return Math.round(Number(amount) * 100);
+  }
+
+  private formatCop(amount: number | string) {
+    return `$${Number(amount).toLocaleString('es-CO')} COP`;
+  }
+
+  private receiptNumberFor(paymentId: string) {
+    return `SC-${paymentId.replace(/-/g, '').slice(0, 12).toUpperCase()}`;
+  }
+
+  private hasReceipt(payment: any) {
+    return ['held', 'released', 'disbursed'].includes(payment.status);
+  }
+
+  private async requirePayment(paymentId: string) {
+    const { data: payment, error } = await this.db
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .maybeSingle();
+
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!payment) throw new NotFoundException('Pago no encontrado');
+    return payment;
+  }
 
   private async requireServiceForClient(serviceId: string, clientId: string) {
     const { data: service, error } = await this.db
@@ -813,262 +1047,6 @@ export class PaymentsService {
     return payment;
   }
 
-  // ─── Wallet completo del trabajador ────────────────────────────────────────
-
-  async getWorkerWallet(workerId: string) {
-    const { data: payments, error } = await this.db
-      .from('payments')
-      .select(
-        `
-        id, service_id, status, payout_status, payment_mode,
-        worker_amount, commission_amount, amount_total, currency,
-        created_at, paid_at, disbursed_at, external_transfer_id,
-        services:service_id(title, scheduled_at, address)
-      `,
-      )
-      .eq('worker_id', workerId)
-      .order('created_at', { ascending: false });
-
-    if (error) throw new InternalServerErrorException(error.message);
-
-    const rows = payments ?? [];
-
-    const processingBalance = rows
-      .filter((p) => p.status === 'held')
-      .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
-
-    const availableBalance = rows
-      .filter((p) => p.status === 'released' || p.status === 'disbursed')
-      .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
-
-    const paidOutTotal = rows
-      .filter(
-        (p) => p.status === 'disbursed' && p.payout_status === 'completed',
-      )
-      .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
-
-    const pendingManualTotal = rows
-      .filter((p) => p.payout_status === 'pending_manual')
-      .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
-
-    const transactions = rows.map((p) => ({
-      id: p.id,
-      service_id: p.service_id,
-      service_title: (p.services as any)?.title ?? null,
-      service_address: (p.services as any)?.address ?? null,
-      scheduled_at: (p.services as any)?.scheduled_at ?? null,
-      worker_amount: Number(p.worker_amount ?? 0),
-      commission_amount: Number(p.commission_amount ?? 0),
-      total_amount: Number(p.amount_total ?? 0),
-      currency: p.currency ?? 'COP',
-      status: p.status,
-      payout_status: p.payout_status,
-      payment_mode: p.payment_mode,
-      external_transfer_id: p.external_transfer_id ?? null,
-      created_at: p.created_at,
-      paid_at: p.paid_at,
-      disbursed_at: p.disbursed_at,
-    }));
-
-    const mpConnected =
-      !!(await this.mpOAuthService.getWorkerAccount(workerId));
-
-    return {
-      available_balance: availableBalance,
-      processing_balance: processingBalance,
-      paid_out_total: paidOutTotal,
-      pending_manual_total: pendingManualTotal,
-      marketplace_enabled: mpConnected,
-      transactions,
-    };
-  }
-
-  // ─── Balance del trabajador ─────────────────────────────────────────────────
-
-  async getWorkerBalance(workerId: string) {
-    const { data: payments, error } = await this.db
-      .from('payments')
-      .select('status, worker_amount')
-      .eq('worker_id', workerId);
-
-    if (error) throw new InternalServerErrorException(error.message);
-
-    const rows = payments ?? [];
-
-    const inEscrow = rows
-      .filter((p) => p.status === 'held')
-      .reduce((sum, p) => sum + Number(p.worker_amount ?? 0), 0);
-
-    const available = rows
-      .filter((p) => p.status === 'released' || p.status === 'disbursed')
-      .reduce((sum, p) => sum + Number(p.worker_amount ?? 0), 0);
-
-    const totalPaid = rows
-      .filter((p) => p.status === 'disbursed')
-      .reduce((sum, p) => sum + Number(p.worker_amount ?? 0), 0);
-
-    return { available, in_escrow: inEscrow, total_paid: totalPaid };
-  }
-
-  // ─── Desembolso automático al técnico ───────────────────────────────────────
-
-  async disburseWorkerPayment(serviceId: string): Promise<void> {
-    const { data: payment, error } = await this.db
-      .from('payments')
-      .select('*')
-      .eq('service_id', serviceId)
-      .eq('status', 'held')
-      .maybeSingle();
-
-    if (error) {
-      this.logger.error(
-        `Error buscando pago held para servicio ${serviceId}: ${error.message}`,
-      );
-      return;
-    }
-    if (!payment) {
-      this.logger.warn(
-        `No se encontró pago en estado 'held' para servicio ${serviceId}`,
-      );
-      return;
-    }
-
-    const serviceRow = await this.getServiceBasicData(serviceId);
-    const serviceTitle = serviceRow?.title ?? null;
-
-    // Idempotencia: ya fue procesado
-    if (
-      payment.payout_status === 'completed' ||
-      payment.status === 'disbursed'
-    ) {
-      return;
-    }
-
-    // Si fue un pago marketplace, el trabajador ya recibió su dinero al momento del pago.
-    // Solo actualizamos el estado interno.
-    if (payment.payment_mode === 'marketplace') {
-      const result = this.payoutService.marketplaceSplitAlreadyExecuted(
-        payment.id,
-      );
-      const now = new Date().toISOString();
-      await this.db
-        .from('payments')
-        .update({
-          status: 'disbursed',
-          payout_status: 'completed',
-          disbursed_at: now,
-          payout_attempts: 1,
-          updated_at: now,
-        })
-        .eq('id', payment.id);
-
-      await this.logAudit({
-        payment_id: payment.id,
-        previous_status: 'held',
-        new_status: 'disbursed',
-        source: 'system',
-        note: 'Marketplace split: el trabajador recibió su pago automáticamente.',
-        metadata: { method: result.method },
-      });
-      await this.notifyWorkerPaymentDeposited({
-        workerId: payment.worker_id,
-        paymentId: payment.id,
-        serviceId,
-        workerAmount: Number(payment.worker_amount),
-        dataType: 'payment_disbursed',
-        serviceTitle,
-      });
-      return;
-    }
-
-    // Flujo estándar: plataforma transfiere al trabajador
-    const workerAccount = await this.mpOAuthService.getWorkerAccount(
-      payment.worker_id,
-    );
-
-    const result = await this.payoutService.transferToWorker({
-      referenceId: payment.id,
-      recipientMpUserId: workerAccount?.mp_user_id ?? '',
-      amount: Number(payment.worker_amount),
-      description: `SerCom - Servicio completado ${serviceId}`,
-    });
-
-    const now = new Date().toISOString();
-    const updatePayload: Record<string, any> = {
-      payout_status: result.payoutStatus,
-      payout_attempts: (payment.payout_attempts ?? 0) + 1,
-      updated_at: now,
-    };
-
-    // El pago se compromete al trabajador aunque la transferencia sea manual.
-    // Esto garantiza que el trabajador siempre ve el dinero como "disponible".
-    if (result.success || result.payoutStatus === 'pending_manual') {
-      updatePayload.status = 'disbursed';
-      updatePayload.disbursed_at = now;
-      if (result.externalId) {
-        updatePayload.external_transfer_id = result.externalId;
-      }
-      if (result.error) {
-        updatePayload.payout_error = result.error;
-      }
-    } else {
-      updatePayload.payout_error = result.error;
-    }
-
-    await this.db.from('payments').update(updatePayload).eq('id', payment.id);
-
-    await this.logAudit({
-      payment_id: payment.id,
-      previous_status: 'held',
-      new_status: updatePayload.status ?? 'held',
-      source: 'system',
-      note: result.success
-        ? `Payout automático ejecutado. MP transfer ID: ${result.externalId}`
-        : `Payout ${result.payoutStatus}: ${result.error}`,
-      metadata: { payout_result: result },
-    });
-
-    const disbursed = updatePayload.status === 'disbursed';
-
-    if (payment.worker_id) {
-      if (disbursed) {
-        // HU26: mismo criterio que marca el pago como disponible (incl. pending_manual)
-        await this.notifyWorkerPaymentDeposited({
-          workerId: payment.worker_id,
-          paymentId: payment.id,
-          serviceId,
-          workerAmount: Number(payment.worker_amount),
-          dataType: 'payment_disbursed',
-          serviceTitle,
-        });
-      } else {
-        const amountStr = `$${Number(payment.worker_amount).toLocaleString('es-CO')} COP`;
-        const label =
-          serviceTitle?.trim() ||
-          (await this.getServiceBasicData(serviceId))?.title?.trim() ||
-          'Tu servicio';
-        await this.pushService.sendToUser(payment.worker_id, {
-          title: 'Pago en proceso',
-          body: `Tu pago de ${amountStr} por «${label}» no pudo transferirse automáticamente. Si persiste, contacta soporte.`,
-          data: {
-            type: 'payment_disburse_failed',
-            payment_id: String(payment.id),
-            service_id: String(serviceId),
-            service_title: label.slice(0, 120),
-          },
-        });
-      }
-    }
-
-    if (payment.client_id) {
-      await this.pushService.sendToUser(payment.client_id, {
-        title: 'Servicio finalizado',
-        body: 'El pago fue liberado al técnico. ¡Gracias por usar SerCom!',
-        data: { payment_id: payment.id, type: 'service_completed' },
-      });
-    }
-  }
-
   private guardFinalStatus(status: PaymentStatus) {
     if (status === 'released') {
       throw new BadRequestException('Este pago ya fue liberado');
@@ -1089,6 +1067,12 @@ export class PaymentsService {
       payment.client_id === userId || payment.worker_id === userId;
     if (!isParticipant && !(await this.isAdmin(userId))) {
       throw new ForbiddenException('No tienes permiso para ver este pago');
+    }
+  }
+
+  private async requireAdmin(userId: string, message: string) {
+    if (!(await this.isAdmin(userId))) {
+      throw new ForbiddenException(message);
     }
   }
 
@@ -1115,7 +1099,8 @@ export class PaymentsService {
 
   private buildReceipt(payment: any, service: any) {
     return {
-      receipt_number: payment.receipt_number ?? `PAY-${payment.id}`,
+      receipt_number:
+        payment.receipt_number ?? this.receiptNumberFor(payment.id),
       payment_id: payment.id,
       service_id: payment.service_id,
       service_title: service?.title ?? null,
@@ -1127,15 +1112,15 @@ export class PaymentsService {
       currency: payment.currency,
       provider: payment.provider,
       provider_reference: payment.provider_reference,
-      payment_method: payment.payment_method,
+      payment_method: payment.provider_payment_method ?? payment.payment_method,
       status: payment.status,
       paid_at: payment.paid_at,
       released_at: payment.released_at ?? null,
       custodied_by: 'SerCom',
       message:
-        payment.status === 'released'
-          ? 'Pago liberado al técnico'
-          : 'Pago retenido bajo custodia segura de la plataforma',
+        payment.status === 'held'
+          ? 'Pago retenido bajo custodia segura de la plataforma'
+          : 'Pago liberado al técnico',
     };
   }
 
@@ -1144,14 +1129,33 @@ export class PaymentsService {
       message:
         'Link de pago generado. Completa el pago para garantizar la reserva.',
       payment,
+      payment_id: payment.id,
       checkout_url: checkoutUrl,
+      sandbox: this.wompi.isSandbox,
       instructions:
-        'Después de pagar, el dinero quedará retenido por la plataforma. El técnico recibirá una notificación para iniciar el servicio.',
+        'Puedes pagar con Nequi, Bancolombia, PSE o tarjeta. El dinero quedará retenido por SerCom hasta que confirmes el servicio.',
     };
   }
 
+  private async notifyPaymentHeld(payment: any) {
+    if (payment.worker_id) {
+      await this.pushService.sendToUser(payment.worker_id, {
+        title: 'Pago garantizado',
+        body: 'El cliente garantizó el pago. Puedes iniciar el servicio.',
+        data: { type: 'payment_guaranteed', payment_id: String(payment.id) },
+      });
+    }
+    if (payment.client_id) {
+      await this.pushService.sendToUser(payment.client_id, {
+        title: 'Pago recibido',
+        body: 'Tu pago fue procesado y queda bajo custodia de la plataforma.',
+        data: { payment_id: payment.id, type: 'payment_held' },
+      });
+    }
+  }
+
   /**
-   * HU26 — Notificación al trabajador cuando el pago queda depositado / liberado:
+   * HU26 — Notificación al trabajador cuando el pago queda depositado:
    * incluye monto y nombre del servicio (push + data para deep link).
    */
   private async notifyWorkerPaymentDeposited(params: {
@@ -1172,11 +1176,9 @@ export class PaymentsService {
       title = `${title.slice(0, 117)}…`;
     }
 
-    const amountStr = `$${Number(params.workerAmount).toLocaleString('es-CO')} COP`;
-
     await this.pushService.sendToUser(params.workerId, {
       title: 'Pago depositado',
-      body: `Recibiste ${amountStr} por el servicio «${title}». El dinero ya está disponible en tu cuenta.`,
+      body: `Te transferimos ${this.formatCop(params.workerAmount)} por el servicio «${title}».`,
       data: {
         type: params.dataType,
         payment_id: String(params.paymentId),
@@ -1186,22 +1188,12 @@ export class PaymentsService {
     });
   }
 
-  private async notifyWorkerPaymentGuaranteed(workerId: string | null) {
-    if (!workerId) return;
-    await this.pushService.sendToUser(workerId, {
-      title: 'Pago garantizado',
-      body: 'El cliente garantizó el pago. Puedes iniciar el servicio.',
-      data: { type: 'payment_guaranteed' },
-    });
-  }
-
   private async logAudit(params: {
     payment_id: string;
     previous_status?: string;
     new_status: string;
     source: 'admin' | 'webhook' | 'system' | 'client';
     changed_by?: string | null;
-    mp_payment_id?: string;
     note?: string;
     metadata?: Record<string, any>;
   }) {
@@ -1211,7 +1203,6 @@ export class PaymentsService {
       new_status: params.new_status,
       source: params.source,
       changed_by: params.changed_by ?? null,
-      mp_payment_id: params.mp_payment_id ?? null,
       note: params.note ?? null,
       metadata: params.metadata ?? null,
     });

@@ -4,13 +4,12 @@ import { SupabaseModule } from '../supabase/supabase.module';
 import { PushNotificationsModule } from '../push-notifications/push-notifications.module';
 import { PaymentsController, PaymentsWebhookController } from './payments.controller';
 import { PaymentsService } from './payments.service';
-import { PayoutService } from './payout.service';
-import { MpOAuthModule } from '../oauth/mp-oauth.module';
+import { WompiService } from './wompi.service';
 
 @Module({
-  imports: [ConfigModule, SupabaseModule, PushNotificationsModule, MpOAuthModule],
+  imports: [ConfigModule, SupabaseModule, PushNotificationsModule],
   controllers: [PaymentsController, PaymentsWebhookController],
-  providers: [PaymentsService, PayoutService],
+  providers: [PaymentsService, WompiService],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

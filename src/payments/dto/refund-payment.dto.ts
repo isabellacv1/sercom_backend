@@ -5,4 +5,13 @@ export class RefundPaymentDto {
   @IsString()
   @MaxLength(500)
   reason?: string;
+
+  /**
+   * Comprobante de la devolución hecha por fuera de Wompi (Nequi, PSE,
+   * Bancolombia no se pueden anular por API; solo tarjetas).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  manual_reference?: string;
 }
