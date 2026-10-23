@@ -87,11 +87,13 @@ export class ServiceEvidenceService {
         );
       }
 
+      // Columnas de la tabla existente: file_url guarda la ruta en el bucket
+      // privado (se entrega con URL firmada) y description el nombre original.
       rows.push({
         service_id: serviceId,
-        worker_id: workerId,
-        storage_path: storagePath,
-        file_name: safeName,
+        uploaded_by: workerId,
+        file_url: storagePath,
+        description: safeName,
       });
     }
 
@@ -133,7 +135,7 @@ export class ServiceEvidenceService {
   private async signedList(serviceId: string) {
     const { data, error } = await this.db
       .from('service_evidence')
-      .select('id, storage_path, file_name, created_at')
+      .select('id, file_url, description, created_at')
       .eq('service_id', serviceId)
       .order('created_at', { ascending: true });
 
@@ -145,7 +147,7 @@ export class ServiceEvidenceService {
       await this.supabaseService.client.storage
         .from(EVIDENCE_BUCKET)
         .createSignedUrls(
-          rows.map((r) => r.storage_path),
+          rows.map((r) => r.file_url),
           SIGNED_URL_TTL_SECONDS,
         );
 
@@ -153,7 +155,7 @@ export class ServiceEvidenceService {
 
     return rows.map((r, i) => ({
       id: r.id,
-      file_name: r.file_name,
+      file_name: r.description,
       created_at: r.created_at,
       url: signed?.[i]?.signedUrl ?? null,
     }));
