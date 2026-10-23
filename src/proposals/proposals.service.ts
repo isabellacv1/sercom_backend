@@ -416,7 +416,7 @@ export class ProposalsService {
         service_id: proposal.service_id,
         status: 'assigned',
         changed_by: clientId,
-        note: `Propuesta aceptada. Trabajador asignado: ${proposal.technician_id}. Pago pendiente por Mercado Pago.`,
+        note: `Propuesta aceptada. Trabajador asignado: ${proposal.technician_id}. Pago pendiente.`,
       });
 
     if (historyResponse.error) {
@@ -427,7 +427,7 @@ export class ProposalsService {
 
     return {
       message:
-        'Propuesta aceptada y trabajador asignado. El cliente debe pagar con Mercado Pago para garantizar la reserva.',
+        'Propuesta aceptada y trabajador asignado. El cliente debe completar el pago para garantizar la reserva.',
       assignment: assignmentResponse.data,
       chatRoom: chatRoomResponse.data,
       service: updateServiceResponse.data,

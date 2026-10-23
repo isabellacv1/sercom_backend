@@ -954,7 +954,7 @@ export class ServicesService {
 
   private getEscrowUiMessage(service: any): string {
     if (service.status === 'assigned') {
-      return 'Técnico asignado. El cliente debe realizar el pago por Mercado Pago para garantizar la reserva.';
+      return 'Técnico asignado. El cliente debe completar el pago para garantizar la reserva.';
     }
 
     if (service.status === 'on_the_way') {

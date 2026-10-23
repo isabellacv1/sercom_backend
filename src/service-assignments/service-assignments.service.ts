@@ -403,7 +403,7 @@ export class ServiceAssignmentsService {
           service_id: assignment.service_id,
           status: 'assigned',
           changed_by: clientId,
-          note: `Oferta aceptada. Trabajador asignado: ${assignment.worker_id}. Pago pendiente por Mercado Pago.`,
+          note: `Oferta aceptada. Trabajador asignado: ${assignment.worker_id}. Pago pendiente.`,
         });
 
       if (historyError) {
@@ -414,7 +414,7 @@ export class ServiceAssignmentsService {
 
       return {
         message:
-          'Oferta aceptada correctamente. El cliente debe pagar con Mercado Pago para garantizar la reserva.',
+          'Oferta aceptada correctamente. El cliente debe completar el pago para garantizar la reserva.',
         service_status: 'assigned',
         payment_status: payment.status,
         checkout_url: MERCADO_PAGO_CHECKOUT_URL,

@@ -56,7 +56,6 @@ export class PaymentsService {
   ) {
     this.frontendUrl =
       this.configService.get<string>('PAYMENTS_FRONTEND_URL') ??
-      this.configService.get<string>('MP_FRONTEND_URL') ??
       this.configService.get<string>('APP_URL') ??
       '';
   }
@@ -723,7 +722,6 @@ export class PaymentsService {
       available_balance: sum((p) => p.status === 'released'),
       pending_manual_total: sum((p) => p.status === 'released'),
       paid_out_total: sum((p) => p.status === 'disbursed'),
-      marketplace_enabled: false,
       transactions,
     };
   }

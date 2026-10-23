@@ -21,7 +21,7 @@ import { SupabaseService } from '../supabase/supabase.service';
  */
 @WebSocketGateway({
   cors: {
-    origin: process.env.MP_FRONTEND_URL ?? '*',
+    origin: process.env.FRONTEND_URL ?? '*',
     credentials: true,
   },
 })
