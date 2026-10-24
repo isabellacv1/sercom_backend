@@ -18,6 +18,9 @@ export interface FeeRates {
 
 export interface PaymentAmounts {
   service_price: number;
+  /** Recargo de tarifa dinámica (urgente, noche, domingo/festivo). */
+  surcharge_amount: number;
+  surcharge_reasons: string[] | null;
   client_fee_amount: number;
   worker_commission_amount: number;
   /** Lo que paga el cliente en Wompi. */
@@ -53,17 +56,22 @@ export function getFeeRates(): FeeRates {
 export function computePaymentAmounts(
   servicePrice: number,
   rates: FeeRates = getFeeRates(),
+  surcharge?: { rate: number; reasons: string[]; workerShare: number },
 ): PaymentAmounts {
   const price = Math.round(servicePrice);
   const clientFee = Math.round(price * rates.clientFeeRate);
   const workerCommission = Math.round(price * rates.workerCommissionRate);
+  const extra = surcharge ? Math.round(price * surcharge.rate) : 0;
+  const extraForWorker = surcharge ? Math.round(extra * surcharge.workerShare) : 0;
 
   return {
     service_price: price,
+    surcharge_amount: extra,
+    surcharge_reasons: extra > 0 ? surcharge!.reasons : null,
     client_fee_amount: clientFee,
     worker_commission_amount: workerCommission,
-    amount_total: price + clientFee,
-    commission_amount: clientFee + workerCommission,
-    worker_amount: price - workerCommission,
+    amount_total: price + clientFee + extra,
+    commission_amount: clientFee + workerCommission + (extra - extraForWorker),
+    worker_amount: price - workerCommission + extraForWorker,
   };
 }

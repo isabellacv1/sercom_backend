@@ -86,6 +86,8 @@ function setup(transactions: WompiTransaction[]) {
     } as any,
     { balance: async () => 10000, consumeForPayment: jest.fn() } as any,
     { onClientPaymentHeld: jest.fn(), onWorkerJobCompleted: jest.fn().mockResolvedValue(undefined) } as any,
+    { applyWompiTransaction: jest.fn() } as any,
+    { applyWompiTransaction: jest.fn() } as any,
   );
 
   return { service, tables, push, memberships, tips };

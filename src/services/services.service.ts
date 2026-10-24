@@ -9,7 +9,8 @@ import {
 import { SupabaseService } from '../supabase/supabase.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ServiceEvidenceService } from './service-evidence.service';
-import { getProWorkerIds, proFirst } from '../memberships/pro';
+import { getProWorkerIds } from '../memberships/pro';
+import { getFeaturedWorkerIds, rankWorkers } from '../memberships/ads';
 import { LiveLocationService } from './live-location.service';
 import { RepeatService } from './repeat.service';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -684,8 +685,9 @@ export class ServicesService {
         budget_min: dto.budget_min ?? null,
         budget_max: dto.budget_max ?? null,
         scheduled_at: dto.scheduled_at ?? null,
+        is_urgent: dto.is_urgent ?? false,
         status: 'requested',
-      })
+      } as any)
       .select(
         `
         *,
@@ -914,23 +916,25 @@ export class ServicesService {
         return true;
       }) ?? [];
 
-    const proSet = await getProWorkerIds(
-      this.supabaseService.sbRaw,
-      filteredWorkers.map((item: any) => item.worker?.id),
-    );
+    const workerIds = filteredWorkers.map((item: any) => item.worker?.id);
+    const [proSet, featuredSet] = await Promise.all([
+      getProWorkerIds(this.supabaseService.sbRaw, workerIds),
+      getFeaturedWorkerIds(this.supabaseService.sbRaw, workerIds),
+    ]);
 
     return {
       service_id: service.id,
       category_id: service.category_id,
       service_option_id: service.service_option_id,
       city: service.city,
-      // Los profesionales Pro aparecen primero en la búsqueda.
-      candidates: proFirst(
+      // Destacados (SERCOM Ads) primero, luego los Pro.
+      candidates: rankWorkers(
         filteredWorkers.map((item: any) => ({
           ...item,
           is_pro: proSet.has(item.worker?.id),
+          is_featured: featuredSet.has(item.worker?.id),
         })),
-        (item: any) => item.is_pro,
+        (item: any) => (item.is_featured ? 2 : 0) + (item.is_pro ? 1 : 0),
       ),
     };
   }

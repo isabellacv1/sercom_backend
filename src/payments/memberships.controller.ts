@@ -23,6 +23,19 @@ export class MembershipsController {
     return this.memberships.createCheckout(user.sub, 'pro');
   }
 
+  // GET /memberships/care — plan de mantenimiento "Hogar Tranquilo"
+  @Auth()
+  @Get('care')
+  getCare(@CurrentUser() user: JwtUser) {
+    return this.memberships.getCare(user.sub);
+  }
+
+  @Auth()
+  @Post('care/checkout')
+  checkoutCare(@CurrentUser() user: JwtUser) {
+    return this.memberships.createCheckout(user.sub, 'care');
+  }
+
   // GET /memberships/plus — SERCOM Plus del cliente
   @Auth()
   @Get('plus')

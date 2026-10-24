@@ -50,14 +50,15 @@ describe('SERCOM Pro', () => {
           const f: Record<string, any> = {};
           const q: any = {
             select: () => q,
-            in: (_c: string, v: string[]) => ((f.ids = v), q),
+            in: (c: string, v: string[]) => (c === 'plan' ? (f.plans = v) : (f.ids = v), q),
             eq: (c: string, v: any) => ((f[c] = v), q),
             gt: () => q,
             limit: () => q,
             matches: () =>
               active.filter(
                 ([u, plan]) =>
-                  plan === f.plan && (f.ids ? f.ids.includes(u) : u === f.worker_id),
+                  (f.plans ? f.plans.includes(plan) : plan === f.plan) &&
+                  (f.ids ? f.ids.includes(u) : u === f.worker_id),
               ),
             maybeSingle: () => Promise.resolve({ data: q.matches()[0] ? { id: 'm' } : null }),
             then: (r: any) => r({ data: q.matches().map(([u]: [string]) => ({ worker_id: u })) }),
@@ -83,6 +84,11 @@ describe('SERCOM Pro', () => {
       expect(
         await feeRatesFor(db([['w', 'plus']]), { workerId: 'w', clientId: 'c' }),
       ).toEqual({ clientFeeRate: 0.05, workerCommissionRate: 0.1 });
+    });
+
+    it('el plan Hogar Tranquilo incluye los beneficios de Plus', async () => {
+      const rates = await feeRatesFor(db([['c', 'care' as any]]), { workerId: 'w', clientId: 'c' });
+      expect(rates.clientFeeRate).toBe(0);
     });
   });
 });

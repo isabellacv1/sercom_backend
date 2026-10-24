@@ -14,11 +14,14 @@ import { CouponsService } from './coupons.service';
 import { CreditsService } from './credits.service';
 import { ReferralsService } from './referrals.service';
 import { PromotionsController } from './promotions.controller';
+import { GiftCardsService } from './gift-cards.service';
+import { AdsService } from './ads.service';
+import { GiftAdsController } from './gift-ads.controller';
 
 @Module({
   imports: [ConfigModule, SupabaseModule, PushNotificationsModule],
-  controllers: [PaymentsController, PaymentsWebhookController, MembershipsController, TipsController, PromotionsController],
-  providers: [PaymentsService, WompiService, PayoutAccountService, MembershipsService, TipsService, CouponsService, CreditsService, ReferralsService],
+  controllers: [PaymentsController, PaymentsWebhookController, MembershipsController, TipsController, PromotionsController, GiftAdsController],
+  providers: [PaymentsService, WompiService, PayoutAccountService, MembershipsService, TipsService, CouponsService, CreditsService, ReferralsService, GiftCardsService, AdsService],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

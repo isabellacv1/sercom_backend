@@ -1,5 +1,6 @@
 import { computePaymentAmounts } from '../payments/fees';
 import { feeRatesFor } from '../memberships/pro';
+import { dynamicSurcharge, proposalDateTime } from '../payments/dynamic-pricing';
 import {
   BadRequestException,
   ForbiddenException,
@@ -33,6 +34,8 @@ type AssignmentWithServiceRow = {
   worker_id: string;
   status: string;
   proposed_price: number | null;
+  available_date: string | null;
+  available_from: string | null;
   services:
     | {
         id: string;
@@ -245,6 +248,8 @@ export class ServiceAssignmentsService {
         worker_id,
         status,
         proposed_price,
+        available_date,
+        available_from,
         services:service_id (
           id,
           client_id,
@@ -292,11 +297,22 @@ export class ServiceAssignmentsService {
         );
       }
 
+      const { data: serviceInfo } = await this.supabaseService.sbRaw
+        .from('services')
+        .select('is_urgent, scheduled_at')
+        .eq('id', assignment.service_id)
+        .maybeSingle();
       const amounts = computePaymentAmounts(
         servicePrice,
         await feeRatesFor(this.supabaseService.sbRaw, {
           workerId: assignment.worker_id,
           clientId,
+        }),
+        dynamicSurcharge({
+          isUrgent: serviceInfo?.is_urgent === true,
+          when:
+            proposalDateTime(assignment.available_date, assignment.available_from) ??
+            (serviceInfo?.scheduled_at ? new Date(serviceInfo.scheduled_at) : null),
         }),
       );
 

@@ -9,17 +9,23 @@ import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { WompiService, WompiTransaction } from './wompi.service';
+import { CreditsService } from './credits.service';
 import {
+  getCareConfig,
   getPlusConfig,
   getProConfig,
   isProWorker,
   proposalsThisMonth,
 } from '../memberships/pro';
 
-/** pro = profesionales; plus = clientes (como Rappi Prime). */
-export type MembershipPlan = 'pro' | 'plus';
+/** pro = profesionales; plus = clientes (Rappi Prime); care = mantenimiento. */
+export type MembershipPlan = 'pro' | 'plus' | 'care';
 
 function planConfig(plan: MembershipPlan) {
+  if (plan === 'care') {
+    const c = getCareConfig();
+    return { name: 'Hogar Tranquilo', monthlyPrice: c.monthlyPrice, periodDays: c.periodDays };
+  }
   if (plan === 'plus') {
     const c = getPlusConfig();
     return { name: 'SERCOM Plus', monthlyPrice: c.monthlyPrice, periodDays: c.periodDays };
@@ -44,6 +50,7 @@ export class MembershipsService {
     private readonly supabaseService: SupabaseService,
     private readonly wompi: WompiService,
     private readonly pushService: PushNotificationsService,
+    private readonly credits: CreditsService,
     configService: ConfigService,
   ) {
     this.frontendUrl =
@@ -69,6 +76,46 @@ export class MembershipsService {
         period_days: config.periodDays,
         warranty_days: config.warrantyDays,
         standard_warranty_days: config.standardWarrantyDays,
+      },
+    };
+  }
+
+  /** Plan de mantenimiento "Hogar Tranquilo" del cliente. */
+  async getCare(userId: string) {
+    await this.syncPending(userId);
+    const config = getCareConfig();
+    const active = await this.activeMembership(userId, 'care');
+
+    // Próxima revisión: cada CARE_CHECKUP_DAYS desde el primer mes del plan.
+    let nextCheckup: string | null = null;
+    if (active) {
+      const { data: first } = await this.db
+        .from('worker_memberships')
+        .select('period_start')
+        .eq('worker_id', userId)
+        .eq('plan', 'care')
+        .eq('status', 'active')
+        .order('period_start', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const start = new Date(first?.period_start ?? active.period_start).getTime();
+      const step = config.checkupEveryDays * 86400000;
+      let next = start + step;
+      while (next < Date.now() - 7 * 86400000) next += step;
+      nextCheckup = new Date(next).toISOString();
+    }
+
+    return {
+      is_active: !!active,
+      period_end: active?.period_end ?? null,
+      next_checkup_at: nextCheckup,
+      plan: {
+        name: 'Hogar Tranquilo',
+        monthly_price: config.monthlyPrice,
+        monthly_credit: config.monthlyCredit,
+        period_days: config.periodDays,
+        checkup_every_days: config.checkupEveryDays,
+        warranty_days: getPlusConfig().warrantyDays,
       },
     };
   }
@@ -180,7 +227,8 @@ export class MembershipsService {
       }
 
       // Si ya tenía el plan, el nuevo periodo empieza cuando termina el vigente.
-      const plan: MembershipPlan = row.plan === 'plus' ? 'plus' : 'pro';
+      const plan: MembershipPlan =
+        row.plan === 'plus' ? 'plus' : row.plan === 'care' ? 'care' : 'pro';
       const { data: current } = await this.db
         .from('worker_memberships')
         .select('period_end')
@@ -209,7 +257,18 @@ export class MembershipsService {
         .select('id')
         .maybeSingle();
 
-      if (activated) {
+      if (activated && plan === 'care') {
+        // Saldo del mes para servicios de mantenimiento.
+        const credit = getCareConfig().monthlyCredit;
+        if (credit > 0) {
+          await this.credits.add(row.worker_id, credit, 'Saldo del plan Hogar Tranquilo', row.id);
+        }
+        await this.pushService.sendToUser(row.worker_id, {
+          title: '¡Bienvenido a Hogar Tranquilo!',
+          body: `Tienes $${credit.toLocaleString('es-CO')} de saldo para mantenimiento y todos los beneficios de Plus.`,
+          data: { type: 'membership_active', plan },
+        });
+      } else if (activated) {
         await this.pushService.sendToUser(
           row.worker_id,
           plan === 'plus'

@@ -12,6 +12,8 @@ describe('comisiones a ambos lados', () => {
 
     expect(computePaymentAmounts(100000)).toEqual({
       service_price: 100000,
+      surcharge_amount: 0,
+      surcharge_reasons: null,
       client_fee_amount: 5000,
       worker_commission_amount: 10000,
       amount_total: 105000,

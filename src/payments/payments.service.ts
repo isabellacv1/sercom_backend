@@ -31,6 +31,9 @@ import { CouponsService } from './coupons.service';
 import { CreditsService } from './credits.service';
 import { ReferralsService } from './referrals.service';
 import { ApplyDiscountsDto } from './dto/apply-discounts.dto';
+import { instantFee, instantPayoutConfig } from './instant-payout';
+import { GIFT_REFERENCE_PREFIX, GiftCardsService } from './gift-cards.service';
+import { AD_REFERENCE_PREFIX, AdsService } from './ads.service';
 
 /** Wompi necesita un cobro mínimo: los descuentos no bajan de aquí. */
 export const MIN_CHARGE = 2000;
@@ -70,6 +73,8 @@ export class PaymentsService {
     private readonly coupons: CouponsService,
     private readonly credits: CreditsService,
     private readonly referrals: ReferralsService,
+    private readonly giftCards: GiftCardsService,
+    private readonly ads: AdsService,
   ) {
     this.frontendUrl =
       this.configService.get<string>('PAYMENTS_FRONTEND_URL') ??
@@ -443,6 +448,16 @@ export class PaymentsService {
       return { received: true };
     }
 
+    // Tarjeta de regalo y anuncio destacado.
+    if (transaction.reference?.startsWith(GIFT_REFERENCE_PREFIX)) {
+      await this.giftCards.applyWompiTransaction(transaction);
+      return { received: true };
+    }
+    if (transaction.reference?.startsWith(AD_REFERENCE_PREFIX)) {
+      await this.ads.applyWompiTransaction(transaction);
+      return { received: true };
+    }
+
     // Propina al profesional.
     if (transaction.reference?.startsWith(TIP_REFERENCE_PREFIX)) {
       await this.tips.applyWompiTransaction(transaction);
@@ -557,6 +572,83 @@ export class PaymentsService {
     });
   }
 
+  // ─── Cobro inmediato (profesional) ──────────────────────────────────────────
+
+  /**
+   * Lo que el profesional puede cobrar ya (pagos liberados y propinas por
+   * transferir) y cuánto cuesta el cobro inmediato.
+   */
+  async instantPayoutQuote(workerId: string) {
+    const { data: payments } = await this.db
+      .from('payments')
+      .select('id, worker_amount, payout_priority')
+      .eq('worker_id', workerId)
+      .eq('status', 'released')
+      .eq('payout_status', 'pending_manual');
+    const tips = await this.tips.pendingForWorker(workerId);
+
+    const items = [
+      ...(payments ?? []).map((p: any) => ({ amount: Number(p.worker_amount), instant: p.payout_priority === 'instant' })),
+      ...tips.map((t: any) => ({ amount: Number(t.amount), instant: t.payout_priority === 'instant' })),
+    ];
+    const pending = items.filter((i) => !i.instant);
+    const gross = pending.reduce((s, i) => s + i.amount, 0);
+    const fee = pending.reduce((s, i) => s + instantFee(i.amount), 0);
+    const config = instantPayoutConfig();
+
+    return {
+      available: gross,
+      fee,
+      net: gross - fee,
+      already_requested: items.filter((i) => i.instant).reduce((s, i) => s + i.amount, 0),
+      fee_rate: config.rate,
+      min_fee: config.minFee,
+      promise_hours: config.promiseHours,
+    };
+  }
+
+  /** Pasa todo lo disponible a la cola prioritaria con la comisión de cobro inmediato. */
+  async requestInstantPayout(workerId: string) {
+    const quote = await this.instantPayoutQuote(workerId);
+    if (quote.available <= 0) {
+      throw new BadRequestException('No tienes dinero disponible para cobrar ahora');
+    }
+
+    const { data: payments } = await this.db
+      .from('payments')
+      .select('id, worker_amount, payout_priority')
+      .eq('worker_id', workerId)
+      .eq('status', 'released')
+      .eq('payout_status', 'pending_manual');
+    for (const p of payments ?? []) {
+      if (p.payout_priority === 'instant') continue;
+      await this.db
+        .from('payments')
+        .update({
+          payout_priority: 'instant',
+          payout_fee: instantFee(Number(p.worker_amount)),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', p.id)
+        .eq('payout_status', 'pending_manual');
+      await this.logAudit({
+        payment_id: p.id,
+        new_status: 'released',
+        source: 'client',
+        changed_by: workerId,
+        note: 'El profesional pidió cobro inmediato',
+      });
+    }
+    for (const t of await this.tips.pendingForWorker(workerId)) {
+      if (t.payout_priority !== 'instant') await this.tips.markInstant(t.id, Number(t.amount));
+    }
+
+    return {
+      message: `Listo: te transferimos ${this.formatCop(quote.net)} en menos de ${quote.promise_hours} horas (horario hábil).`,
+      ...quote,
+    };
+  }
+
   // ─── Transferencias a técnicos (admin) ──────────────────────────────────────
 
   async listPendingPayouts(userId: string) {
@@ -571,6 +663,7 @@ export class PaymentsService {
         `
         id, service_id, worker_id, worker_amount, commission_amount,
         amount_total, currency, released_at, payout_status,
+        payout_priority, payout_fee,
         services:service_id(title)
       `,
       )
@@ -612,6 +705,10 @@ export class PaymentsService {
         // A dónde transferir: Nequi / Daviplata / cuenta bancaria del técnico.
         payout_account: accountByWorker.get(r.worker_id) ?? null,
         worker_amount: Number(r.worker_amount ?? 0),
+        instant: r.payout_priority === 'instant',
+        payout_fee: Number(r.payout_fee ?? 0),
+        // Lo que hay que transferir (descontando el cobro inmediato).
+        net_amount: Number(r.worker_amount ?? 0) - Number(r.payout_fee ?? 0),
         commission_amount: Number(r.commission_amount ?? 0),
         amount_total: Number(r.amount_total ?? 0),
         currency: r.currency ?? 'COP',
@@ -628,15 +725,22 @@ export class PaymentsService {
         worker_id: t.worker_id,
         worker_name: worker?.full_name ?? null,
         amount: Number(t.amount ?? 0),
+        instant: t.payout_priority === 'instant',
+        payout_fee: Number(t.payout_fee ?? 0),
+        net_amount: Number(t.amount ?? 0) - Number(t.payout_fee ?? 0),
         paid_at: t.paid_at,
         payout_account: accountByWorker.get(t.worker_id) ?? null,
       };
     });
 
+    // Cobro inmediato primero.
+    payouts.sort((a, b) => Number(b.instant) - Number(a.instant));
+    tips.sort((a, b) => Number(b.instant) - Number(a.instant));
+
     return {
       total_pending:
-        payouts.reduce((s, p) => s + p.worker_amount, 0) +
-        tips.reduce((s, t) => s + t.amount, 0),
+        payouts.reduce((s, p) => s + p.net_amount, 0) +
+        tips.reduce((s, t) => s + t.net_amount, 0),
       payouts,
       // Propinas pendientes de transferir (100% del profesional).
       tips,
@@ -698,7 +802,7 @@ export class PaymentsService {
       workerId: disbursed.worker_id,
       paymentId,
       serviceId: disbursed.service_id,
-      workerAmount: Number(disbursed.worker_amount),
+      workerAmount: Number(disbursed.worker_amount) - Number(disbursed.payout_fee ?? 0),
       dataType: 'payment_disbursed',
       serviceTitle: svc?.title ?? null,
     });

@@ -117,6 +117,18 @@ export class PaymentsController {
     return this.payoutAccountService.upsert(user.sub, dto);
   }
 
+  // ─── Cobro inmediato ─────────────────────────────────────────────────────
+
+  @Get('worker/instant-payout')
+  instantPayoutQuote(@CurrentUser() user: JwtUser) {
+    return this.paymentsService.instantPayoutQuote(user.sub);
+  }
+
+  @Post('worker/instant-payout')
+  requestInstantPayout(@CurrentUser() user: JwtUser) {
+    return this.paymentsService.requestInstantPayout(user.sub);
+  }
+
   @Get('worker/balance')
   getWorkerBalance(@CurrentUser() user: JwtUser) {
     return this.paymentsService.getWorkerBalance(user.sub);

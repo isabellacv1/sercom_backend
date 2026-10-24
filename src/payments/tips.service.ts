@@ -14,6 +14,7 @@ import { PushNotificationsService } from '../push-notifications/push-notificatio
 import { WompiService, WompiTransaction } from './wompi.service';
 import { CreateTipDto } from './dto/create-tip.dto';
 import { CompletePayoutDto } from './dto/complete-payout.dto';
+import { instantFee } from './instant-payout';
 
 /** Prefijo de las referencias Wompi de propinas. */
 export const TIP_REFERENCE_PREFIX = 'tip_';
@@ -225,10 +226,29 @@ export class TipsService {
     };
   }
 
+  /** Propinas pendientes del profesional que pasan a cobro inmediato. */
+  async pendingForWorker(workerId: string) {
+    const { data } = await this.db
+      .from('service_tips')
+      .select('id, amount, payout_priority')
+      .eq('worker_id', workerId)
+      .eq('status', 'paid')
+      .eq('payout_status', 'pending_manual');
+    return data ?? [];
+  }
+
+  async markInstant(tipId: string, amount: number) {
+    await this.db
+      .from('service_tips')
+      .update({ payout_priority: 'instant', payout_fee: instantFee(amount), updated_at: new Date().toISOString() })
+      .eq('id', tipId)
+      .eq('payout_status', 'pending_manual');
+  }
+
   async pendingPayouts() {
     const { data } = await this.db
       .from('service_tips')
-      .select('id, service_id, worker_id, amount, paid_at, services:service_id(title)')
+      .select('id, service_id, worker_id, amount, paid_at, payout_priority, payout_fee, services:service_id(title)')
       .eq('status', 'paid')
       .eq('payout_status', 'pending_manual')
       .order('paid_at', { ascending: true });
@@ -248,7 +268,7 @@ export class TipsService {
       .eq('id', tipId)
       .eq('status', 'paid')
       .eq('payout_status', 'pending_manual')
-      .select('id, worker_id, amount')
+      .select('id, worker_id, amount, payout_fee')
       .maybeSingle();
 
     if (error) throw new InternalServerErrorException(error.message);
@@ -257,7 +277,7 @@ export class TipsService {
     if (data.worker_id) {
       await this.pushService.sendToUser(data.worker_id, {
         title: 'Propina transferida',
-        body: `Te transferimos ${this.formatCop(data.amount)} de propina.`,
+        body: `Te transferimos ${this.formatCop(Number(data.amount) - Number(data.payout_fee ?? 0))} de propina.`,
         data: { type: 'tip_disbursed' },
       });
     }

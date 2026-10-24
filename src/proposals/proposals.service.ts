@@ -1,10 +1,11 @@
 import { computePaymentAmounts } from '../payments/fees';
+import { dynamicSurcharge, proposalDateTime } from '../payments/dynamic-pricing';
+import { getFeaturedWorkerIds, rankWorkers } from '../memberships/ads';
 import {
   feeRatesFor,
   getProConfig,
   getProWorkerIds,
   isProWorker,
-  proFirst,
   proposalsThisMonth,
 } from '../memberships/pro';
 import {
@@ -189,13 +190,14 @@ export class ProposalsService {
       throw new InternalServerErrorException(proposalsResponse.error.message);
     }
 
-    const proSet = await getProWorkerIds(
-      this.supabaseService.sbRaw,
-      (proposalsResponse.data ?? []).map((p: any) => p.technician_id),
-    );
-    // Los profesionales Pro aparecen primero.
-    const proposals = proFirst(proposalsResponse.data ?? [], (p: any) =>
-      proSet.has(p.technician_id),
+    const technicianIds = (proposalsResponse.data ?? []).map((p: any) => p.technician_id);
+    const [proSet, featuredSet] = await Promise.all([
+      getProWorkerIds(this.supabaseService.sbRaw, technicianIds),
+      getFeaturedWorkerIds(this.supabaseService.sbRaw, technicianIds),
+    ]);
+    // Primero los destacados (SERCOM Ads), luego los Pro.
+    const proposals = rankWorkers(proposalsResponse.data ?? [], (p: any) =>
+      (featuredSet.has(p.technician_id) ? 2 : 0) + (proSet.has(p.technician_id) ? 1 : 0),
     );
 
     return {
@@ -220,6 +222,7 @@ export class ProposalsService {
           ratingCount: Number(proposal.profiles?.rating_count ?? 0),
           profileImageUrl: proposal.profiles?.profile_image_url ?? null,
           isPro: proSet.has(proposal.technician_id),
+          isFeatured: featuredSet.has(proposal.technician_id),
         },
       })),
     };
@@ -403,11 +406,22 @@ export class ProposalsService {
       );
     }
 
+    const { data: serviceInfo } = await this.supabaseService.sbRaw
+      .from('services')
+      .select('is_urgent, scheduled_at')
+      .eq('id', proposal.service_id)
+      .maybeSingle();
     const amounts = computePaymentAmounts(
       servicePrice,
       await feeRatesFor(this.supabaseService.sbRaw, {
         workerId: proposal.technician_id,
         clientId,
+      }),
+      dynamicSurcharge({
+        isUrgent: serviceInfo?.is_urgent === true,
+        when:
+          proposalDateTime(proposal.available_date, proposal.available_from) ??
+          (serviceInfo?.scheduled_at ? new Date(serviceInfo.scheduled_at) : null),
       }),
     );
 

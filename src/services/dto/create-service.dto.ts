@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsNotEmpty,
   IsNumber,
@@ -52,4 +53,9 @@ export class CreateServiceDto {
   @IsOptional()
   @IsDateString()
   scheduled_at?: string;
+
+  /** Servicio urgente (aplica recargo de tarifa dinámica). */
+  @IsOptional()
+  @IsBoolean()
+  is_urgent?: boolean;
 }
