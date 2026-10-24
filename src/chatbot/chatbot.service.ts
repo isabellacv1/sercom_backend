@@ -8,6 +8,11 @@ import {
 import { GeminiProvider } from './providers/gemini.provider';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ResolveDraftDto } from './dto/resolve-draft.dto';
+import { buildSystemPrompt, ChatbotUserContext } from './utils/chatbot-prompts';
+import { getFeeRates } from '../payments/fees';
+import { getPlusConfig, getProConfig, isPlusClient, isProWorker } from '../memberships/pro';
+
+const CATALOG_TTL_MS = 10 * 60 * 1000;
 
 @Injectable()
 export class ChatbotService {
@@ -18,8 +23,74 @@ export class ChatbotService {
     private readonly supabaseService: SupabaseService,
   ) {}
 
-  async processMessage(messages: any[]) {
-    return await this.geminiProvider.generateResponse(messages);
+  private catalogCache?: { at: number; catalog: Record<string, string[]> };
+
+  async processMessage(userId: string, messages: any[]) {
+    const [catalog, user] = await Promise.all([this.catalog(), this.userContext(userId)]);
+    const rates = getFeeRates();
+    const prompt = buildSystemPrompt(catalog, user, {
+      clientFeePct: Math.round(rates.clientFeeRate * 100),
+      workerFeePct: Math.round(rates.workerCommissionRate * 100),
+      proFeePct: Math.round(getProConfig().workerCommissionRate * 100),
+      plusPrice: getPlusConfig().monthlyPrice,
+      proPrice: getProConfig().monthlyPrice,
+    });
+    return this.geminiProvider.generateResponse(prompt, messages);
+  }
+
+  /** Categorías y servicios activos de la BD (caché de 10 minutos). */
+  private async catalog(): Promise<Record<string, string[]>> {
+    if (this.catalogCache && Date.now() - this.catalogCache.at < CATALOG_TTL_MS) {
+      return this.catalogCache.catalog;
+    }
+    const db = this.supabaseService.sbRaw;
+    const [{ data: categories }, { data: options }] = await Promise.all([
+      db.from('service_categories').select('id, name').eq('is_active', true),
+      db.from('service_options').select('category_id, title').eq('is_active', true),
+    ]);
+    const catalog: Record<string, string[]> = {};
+    for (const c of categories ?? []) {
+      catalog[c.name] = (options ?? [])
+        .filter((o: any) => o.category_id === c.id)
+        .map((o: any) => o.title);
+    }
+    this.catalogCache = { at: Date.now(), catalog };
+    return catalog;
+  }
+
+  /** Quién escribe: nombre, modo, membresía y sus últimos servicios. */
+  private async userContext(userId: string): Promise<ChatbotUserContext> {
+    const db = this.supabaseService.sbRaw;
+    const { data: profile } = await db
+      .from('profiles')
+      .select('full_name, active_role')
+      .eq('id', userId)
+      .maybeSingle();
+    const role = profile?.active_role === 'worker' ? 'worker' : 'client';
+    const column = role === 'worker' ? 'assigned_worker_id' : 'client_id';
+
+    const [{ data: services }, isPlus, isPro] = await Promise.all([
+      db
+        .from('services')
+        .select('title, status, payments(status)')
+        .eq(column, userId)
+        .order('created_at', { ascending: false })
+        .limit(5),
+      isPlusClient(db, userId),
+      isProWorker(db, userId),
+    ]);
+
+    return {
+      firstName: profile?.full_name?.split(' ')[0] ?? null,
+      role,
+      isPlus,
+      isPro,
+      services: (services ?? []).map((s: any) => ({
+        title: s.title ?? 'Servicio',
+        status: s.status,
+        payment: (Array.isArray(s.payments) ? s.payments[0]?.status : s.payments?.status) ?? null,
+      })),
+    };
   }
 
   async resolveDraft(dto: ResolveDraftDto) {

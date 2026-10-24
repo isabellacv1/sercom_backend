@@ -11,7 +11,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 import { ChatbotResponseDto, MissionDraftDto } from '../dto/chatbot-response.dto';
 
-import { CHATBOT_SYSTEM_PROMPT } from '../utils/chatbot-prompts';
+import { CHATBOT_ACTIONS, ChatbotAction } from '../utils/chatbot-prompts';
+
+/** Solo se envían los últimos mensajes (contexto suficiente y menos costo). */
+const MAX_HISTORY = 20;
 
 // Reintentos para errores temporales (429 por minuto, 503 de sobrecarga)
 const MAX_RETRIES = 2;
@@ -33,12 +36,13 @@ export class GeminiProvider {
     this.logger.log(`Modelo Gemini configurado: ${this.model}`);
   }
 
-  async generateResponse(messages: any[]): Promise<ChatbotResponseDto> {
+  async generateResponse(systemPrompt: string, messages: any[]): Promise<ChatbotResponseDto> {
     const conversation = messages
-      .map((m) => `${m.isUser ? 'Usuario' : 'Asistente'}: ${m.text}`)
+      .slice(-MAX_HISTORY)
+      .map((m) => `${m.isUser ? 'Usuario' : 'Asistente'}: ${String(m.text ?? '').slice(0, 1500)}`)
       .join('\n');
 
-    const prompt = `${CHATBOT_SYSTEM_PROMPT}\n\nConversación:\n${conversation}`;
+    const prompt = `${systemPrompt}\n\nConversación:\n${conversation}\n\nAsistente (JSON):`;
 
     return this.callWithRetry(prompt, 0);
   }
@@ -48,7 +52,11 @@ export class GeminiProvider {
     attempt: number,
   ): Promise<ChatbotResponseDto> {
     try {
-      const model = this.genAI.getGenerativeModel({ model: this.model });
+      // Modo JSON: Gemini devuelve directamente un objeto válido.
+      const model = this.genAI.getGenerativeModel({
+        model: this.model,
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
+      });
       const result = await model.generateContent(prompt);
       const rawResponse = result.response.text();
 
@@ -165,6 +173,8 @@ export class GeminiProvider {
       reply: 'Disculpa, tuve un problema procesando tu mensaje. ¿Puedes repetirlo?',
       readyToCreate: false,
       missionDraft: null,
+      suggestions: [],
+      action: null,
     };
   }
 
@@ -183,7 +193,20 @@ export class GeminiProvider {
       ? this.buildSafeDraft(parsed.missionDraft)
       : null;
 
-    return { reply, readyToCreate, missionDraft } as ChatbotResponseDto;
+    const suggestions = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions
+          .filter((x: unknown): x is string => typeof x === 'string' && x.trim().length > 0)
+          .map((x: string) => x.trim().slice(0, 40))
+          .slice(0, 3)
+      : [];
+
+    const action: ChatbotAction | null = CHATBOT_ACTIONS.includes(parsed.action)
+      ? parsed.action
+      : readyToCreate
+        ? 'create_service'
+        : null;
+
+    return { reply, readyToCreate, missionDraft, suggestions, action };
   }
 
   private buildSafeDraft(raw: Record<string, any>): MissionDraftDto {

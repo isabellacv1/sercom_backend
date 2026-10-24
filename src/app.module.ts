@@ -15,6 +15,7 @@ import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 import { PaymentsModule } from './payments/payments.module';
 import { WorkerCredentialsModule } from './worker-credentials/worker-credentials.module';
 import { SupportModule } from './support/support.module';
+import { AdminModule } from './admin/admin.module';
 import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -38,6 +39,7 @@ import { FavoritesModule } from './favorites/favorites.module';
     PaymentsModule,
     WorkerCredentialsModule,
     SupportModule,
+    AdminModule,
     PushNotificationsModule,
     ChatbotModule,
     ReviewsModule,
