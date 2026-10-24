@@ -1111,6 +1111,8 @@ export class PaymentsService {
       service_title: service?.title ?? null,
       service_address: service?.address ?? null,
       scheduled_at: service?.scheduled_at ?? null,
+      service_price: payment.service_price ?? payment.amount_total,
+      client_fee_amount: payment.client_fee_amount ?? 0,
       amount_total: payment.amount_total,
       commission_amount: payment.commission_amount,
       worker_amount: payment.worker_amount,

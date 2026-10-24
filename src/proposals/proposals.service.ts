@@ -1,3 +1,4 @@
+import { computePaymentAmounts } from '../payments/fees';
 import {
   BadRequestException,
   ForbiddenException,
@@ -352,16 +353,15 @@ export class ProposalsService {
       );
     }
 
-    const amountTotal = Number(proposal.price);
+    const servicePrice = Number(proposal.price);
 
-    if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
+    if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
       throw new BadRequestException(
         'La propuesta aceptada no tiene un valor válido para generar el pago',
       );
     }
 
-    const commissionAmount = Math.round(amountTotal * 0.1);
-    const workerAmount = amountTotal - commissionAmount;
+    const amounts = computePaymentAmounts(servicePrice);
 
     const existingPaymentResponse = await this.supabaseService.sb
       .from('payments')
@@ -385,9 +385,7 @@ export class ProposalsService {
         service_id: proposal.service_id,
         client_id: clientId,
         worker_id: proposal.technician_id,
-        amount_total: amountTotal,
-        commission_amount: commissionAmount,
-        worker_amount: workerAmount,
+        ...amounts,
         currency: 'COP',
         provider: 'wompi',
         payment_method: 'wompi_checkout',

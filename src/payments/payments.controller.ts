@@ -19,6 +19,7 @@ import { CompletePayoutDto } from './dto/complete-payout.dto';
 import type { WompiEvent } from './wompi.service';
 import { PayoutAccountService } from './payout-account.service';
 import { PayoutAccountDto } from './dto/payout-account.dto';
+import { getFeeRates } from './fees';
 
 type JwtUser = { sub: string };
 
@@ -61,6 +62,17 @@ export class PaymentsController {
   @Post('checkout')
   createCheckout(@CurrentUser() user: JwtUser, @Body() dto: CreateCheckoutDto) {
     return this.paymentsService.createCheckout(user.sub, dto);
+  }
+
+  // ─── Tasas de comisión vigentes (para mostrar el desglose en la app) ────
+
+  @Get('fees')
+  getFees() {
+    const rates = getFeeRates();
+    return {
+      client_fee_rate: rates.clientFeeRate,
+      worker_commission_rate: rates.workerCommissionRate,
+    };
   }
 
   // ─── Transferencias pendientes a técnicos (admin) ────────────────────────

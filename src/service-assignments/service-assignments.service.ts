@@ -1,3 +1,4 @@
+import { computePaymentAmounts } from '../payments/fees';
 import {
   BadRequestException,
   ForbiddenException,
@@ -9,8 +10,6 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { CreateServiceAssignmentDto } from './dto/create-service-assignment.dto';
 import { RespondServiceAssignmentDto } from './dto/respond-service-assignment.dto';
 
-// El checkout URL se genera dinámicamente en POST /payments/checkout
-const MERCADO_PAGO_CHECKOUT_URL: null = null;
 
 type ServiceRow = {
   id: string;
@@ -284,17 +283,15 @@ export class ServiceAssignmentsService {
     if (dto.status === 'accepted') {
       const now = new Date().toISOString();
 
-      const amountTotal = Number(assignment.proposed_price ?? 0);
+      const servicePrice = Number(assignment.proposed_price ?? 0);
 
-      if (!Number.isFinite(amountTotal) || amountTotal <= 0) {
+      if (!Number.isFinite(servicePrice) || servicePrice <= 0) {
         throw new BadRequestException(
           'La oferta aceptada no tiene un valor válido para generar el pago',
         );
       }
 
-      const commissionRate = 0.1;
-      const commissionAmount = Math.round(amountTotal * commissionRate);
-      const workerAmount = amountTotal - commissionAmount;
+      const amounts = computePaymentAmounts(servicePrice);
 
       const { data: existingPayment, error: existingPaymentError } =
         await supabase
@@ -372,15 +369,13 @@ export class ServiceAssignmentsService {
           service_id: assignment.service_id,
           client_id: clientId,
           worker_id: assignment.worker_id,
-          amount_total: amountTotal,
-          commission_amount: commissionAmount,
-          worker_amount: workerAmount,
+          ...amounts,
           currency: 'COP',
           status: 'pending',
           provider: 'wompi',
           payment_method: 'wompi_checkout',
           provider_reference: null,
-          checkout_url: MERCADO_PAGO_CHECKOUT_URL,
+          checkout_url: null,
         } as any)
         .select()
         .single();
@@ -417,7 +412,8 @@ export class ServiceAssignmentsService {
           'Oferta aceptada correctamente. El cliente debe completar el pago para garantizar la reserva.',
         service_status: 'assigned',
         payment_status: payment.status,
-        checkout_url: MERCADO_PAGO_CHECKOUT_URL,
+        // El link de pago se genera aparte con POST /payments/checkout.
+        checkout_url: null,
         service: updatedService,
         payment,
       };
