@@ -59,7 +59,7 @@ describe('modelos de respaldo de Gemini', () => {
       getGenerativeModel: ({ model }: { model: string }) => ({
         generateContent: async () => {
           calls.push(model);
-          if (model === 'gemini-2.0-flash') {
+          if (model !== 'gemini-3.5-flash-lite') {
             throw Object.assign(new Error('models/gemini-2.0-flash is not found'), { status: 404 });
           }
           return { response: { text: () => '{"reply":"Hola","suggestions":["Sí"]}' } };
@@ -67,12 +67,34 @@ describe('modelos de respaldo de Gemini', () => {
       }),
     };
     const r = await provider.generateResponse('prompt', [{ text: 'hola', isUser: true }]);
-    expect(calls).toEqual(['gemini-2.0-flash', 'gemini-2.5-flash']);
+    expect(calls).toEqual(['gemini-2.0-flash', 'gemini-3.5-flash-lite']);
     expect(r.reply).toBe('Hola');
   });
 
   it('sin llave avisa claramente en vez de un error genérico', async () => {
     const provider = new GeminiProvider({ get: () => undefined } as unknown as ConfigService);
     await expect(provider.generateResponse('p', [])).rejects.toThrow('falta GEMINI_API_KEY');
+  });
+
+  it('sigue la recomendación de Google cuando retira un modelo', async () => {
+    const provider = make();
+    const calls: string[] = [];
+    provider.genAI = {
+      getGenerativeModel: ({ model }: { model: string }) => ({
+        generateContent: async () => {
+          calls.push(model);
+          if (model !== 'gemini-9-flash') {
+            throw Object.assign(
+              new Error(`[404 Not Found] This model models/${model} is no longer available to new users. Please update your code to use models/gemini-9-flash for the latest features.`),
+              { status: 404 },
+            );
+          }
+          return { response: { text: () => '{"reply":"Listo"}' } };
+        },
+      }),
+    };
+    const r = await provider.generateResponse('prompt', [{ text: 'hola', isUser: true }]);
+    expect(calls).toEqual(['gemini-3.5-flash-lite', 'gemini-9-flash']);
+    expect(r.reply).toBe('Listo');
   });
 });

@@ -43,9 +43,11 @@ export class GeminiProvider {
     this.genAI = new GoogleGenerativeAI(apiKey);
     const configured = this.configService.get<string>('GEMINI_MODEL')?.trim();
     this.models = [
-      ...new Set([configured, 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(
-        (m): m is string => !!m,
-      )),
+      ...new Set(
+        [configured, 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-2.5-flash'].filter(
+          (m): m is string => !!m,
+        ),
+      ),
     ];
     if (!this.hasKey) {
       this.logger.error('GEMINI_API_KEY no configurada: el asistente no podrá responder.');
@@ -89,7 +91,17 @@ export class GeminiProvider {
       const parsed = this.extractAndParseJson(rawResponse);
       return this.buildSafeResponse(parsed);
     } catch (error: any) {
-      // Modelo retirado o no disponible para esta llave: probar el siguiente.
+      // Modelo retirado o no disponible para esta llave. Google suele indicar
+      // el reemplazo ("use models/xxx"): se prueba ese primero.
+      if (this.isModelNotFound(error)) {
+        const suggested = this.suggestedModel(error);
+        if (suggested && !this.models.includes(suggested)) {
+          this.models.splice(this.modelIndex + 1, 0, suggested);
+        } else if (suggested && this.models.indexOf(suggested) > this.modelIndex + 1) {
+          this.models.splice(this.models.indexOf(suggested), 1);
+          this.models.splice(this.modelIndex + 1, 0, suggested);
+        }
+      }
       if (this.isModelNotFound(error) && this.modelIndex < this.models.length - 1) {
         this.logger.warn(
           `[${this.model}] no disponible (${error?.message ?? error}). Probando ${this.models[this.modelIndex + 1]}...`,
@@ -142,6 +154,12 @@ export class GeminiProvider {
         detail: `[${this.model}] status ${error?.status ?? '?'}: ${String(error?.message ?? error).slice(0, 300)}`,
       });
     }
+  }
+
+  /** Modelo que Google recomienda en el error, p. ej. "use models/gemini-3.5-flash-lite". */
+  private suggestedModel(error: any): string | null {
+    const match = String(error?.message ?? '').match(/use models\/([a-z0-9.\-]+)/i);
+    return match ? match[1].replace(/\.$/, '') : null;
   }
 
   private isModelNotFound(error: any): boolean {
