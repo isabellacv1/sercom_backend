@@ -1,3 +1,4 @@
+import { isProWorker } from '../memberships/pro';
 import {
   BadRequestException,
   Injectable,
@@ -138,6 +139,9 @@ export class ProfilesService {
 
     return {
       ...profile,
+      is_pro: isWorker
+        ? await isProWorker(this.supabaseService.sbRaw, profileId)
+        : false,
       stats: {
         total_services: total.count ?? 0,
         completed_services: completed.count ?? 0,
