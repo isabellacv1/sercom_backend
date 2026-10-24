@@ -24,16 +24,33 @@ export class GeminiProvider {
   private readonly logger = new Logger(GeminiProvider.name);
   private genAI: GoogleGenerativeAI;
 
-  private readonly model: string;
+  private readonly hasKey: boolean;
+
+  /**
+   * GEMINI_MODEL primero y luego modelos vigentes de respaldo: si Google
+   * retira un modelo (respuesta 404), el asistente sigue funcionando.
+   */
+  private readonly models: string[];
+  private modelIndex = 0;
+
+  private get model() {
+    return this.models[this.modelIndex];
+  }
 
   constructor(private readonly configService: ConfigService) {
-    this.genAI = new GoogleGenerativeAI(
-      this.configService.get<string>('GEMINI_API_KEY')!,
-    );
-    // Configurable via GEMINI_MODEL en .env — default: gemini-2.0-flash
-    this.model =
-      this.configService.get<string>('GEMINI_MODEL') ?? 'gemini-2.0-flash';
-    this.logger.log(`Modelo Gemini configurado: ${this.model}`);
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY') ?? '';
+    this.hasKey = apiKey.trim().length > 0;
+    this.genAI = new GoogleGenerativeAI(apiKey);
+    const configured = this.configService.get<string>('GEMINI_MODEL')?.trim();
+    this.models = [
+      ...new Set([configured, 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(
+        (m): m is string => !!m,
+      )),
+    ];
+    if (!this.hasKey) {
+      this.logger.error('GEMINI_API_KEY no configurada: el asistente no podrá responder.');
+    }
+    this.logger.log(`Modelos Gemini: ${this.models.join(' → ')}`);
   }
 
   async generateResponse(systemPrompt: string, messages: any[]): Promise<ChatbotResponseDto> {
@@ -44,6 +61,11 @@ export class GeminiProvider {
 
     const prompt = `${systemPrompt}\n\nConversación:\n${conversation}\n\nAsistente (JSON):`;
 
+    if (!this.hasKey) {
+      throw new ServiceUnavailableException(
+        'El asistente no está configurado todavía (falta GEMINI_API_KEY en el servidor).',
+      );
+    }
     return this.callWithRetry(prompt, 0);
   }
 
@@ -67,6 +89,22 @@ export class GeminiProvider {
       const parsed = this.extractAndParseJson(rawResponse);
       return this.buildSafeResponse(parsed);
     } catch (error: any) {
+      // Modelo retirado o no disponible para esta llave: probar el siguiente.
+      if (this.isModelNotFound(error) && this.modelIndex < this.models.length - 1) {
+        this.logger.warn(
+          `[${this.model}] no disponible (${error?.message ?? error}). Probando ${this.models[this.modelIndex + 1]}...`,
+        );
+        this.modelIndex++;
+        return this.callWithRetry(prompt, 0);
+      }
+
+      if (this.isAuthError(error)) {
+        this.logger.error(`[${this.model}] Llave de Gemini inválida: ${error?.message}`);
+        throw new ServiceUnavailableException(
+          'La llave del asistente no es válida. Revisa GEMINI_API_KEY en el servidor.',
+        );
+      }
+
       const is429 = this.isQuotaError(error);
       const is503 = this.isOverloadError(error);
 
@@ -93,13 +131,27 @@ export class GeminiProvider {
       }
 
       this.logger.error(
-        `[${this.model}] Error inesperado al generar respuesta`,
-        error?.message ?? error,
+        `[${this.model}] Error inesperado al generar respuesta (status ${error?.status ?? '?'}): ${error?.message ?? error}`,
       );
       throw new InternalServerErrorException(
         'Error generando respuesta del asistente.',
       );
     }
+  }
+
+  private isModelNotFound(error: any): boolean {
+    const status = error?.status ?? error?.response?.status;
+    const message: string = error?.message ?? '';
+    return (
+      status === 404 ||
+      /not found|is not supported|no longer available|deprecated/i.test(message)
+    );
+  }
+
+  private isAuthError(error: any): boolean {
+    const status = error?.status ?? error?.response?.status;
+    const message: string = error?.message ?? '';
+    return status === 401 || status === 403 || /API key not valid|API_KEY_INVALID|permission/i.test(message);
   }
 
   private isOverloadError(error: any): boolean {

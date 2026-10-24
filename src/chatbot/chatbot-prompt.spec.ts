@@ -47,3 +47,32 @@ describe('respuesta del asistente', () => {
     expect(r.action).toBe('create_service');
   });
 });
+
+describe('modelos de respaldo de Gemini', () => {
+  const make = (model?: string) =>
+    new GeminiProvider({ get: (k: string) => (k === 'GEMINI_API_KEY' ? 'k' : model) } as unknown as ConfigService) as any;
+
+  it('si el modelo configurado no existe, usa el siguiente', async () => {
+    const provider = make('gemini-2.0-flash');
+    const calls: string[] = [];
+    provider.genAI = {
+      getGenerativeModel: ({ model }: { model: string }) => ({
+        generateContent: async () => {
+          calls.push(model);
+          if (model === 'gemini-2.0-flash') {
+            throw Object.assign(new Error('models/gemini-2.0-flash is not found'), { status: 404 });
+          }
+          return { response: { text: () => '{"reply":"Hola","suggestions":["Sí"]}' } };
+        },
+      }),
+    };
+    const r = await provider.generateResponse('prompt', [{ text: 'hola', isUser: true }]);
+    expect(calls).toEqual(['gemini-2.0-flash', 'gemini-2.5-flash']);
+    expect(r.reply).toBe('Hola');
+  });
+
+  it('sin llave avisa claramente en vez de un error genérico', async () => {
+    const provider = new GeminiProvider({ get: () => undefined } as unknown as ConfigService);
+    await expect(provider.generateResponse('p', [])).rejects.toThrow('falta GEMINI_API_KEY');
+  });
+});
