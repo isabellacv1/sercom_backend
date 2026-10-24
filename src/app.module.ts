@@ -13,11 +13,9 @@ import { ProposalsModule } from './proposals/proposals.module';
 import { ChatModule } from './chat/chat.module';
 import { WorkerProfileModule } from './worker-profile/worker-profile.module';
 import { PaymentsModule } from './payments/payments.module';
+import { WorkerCredentialsModule } from './worker-credentials/worker-credentials.module';
 import { PushNotificationsModule } from './push-notifications/push-notifications.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
-import { CertificationsModule } from './certifications/certifications.module';
-import { CertificationModulesModule } from './certification_modules/certification_modules.module';
-import { WorkerCertificationsModule } from './worker_certifications/worker_certifications.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { FavoritesModule } from './favorites/favorites.module';
 
@@ -37,11 +35,9 @@ import { FavoritesModule } from './favorites/favorites.module';
     ChatModule,
     WorkerProfileModule,
     PaymentsModule,
+    WorkerCredentialsModule,
     PushNotificationsModule,
     ChatbotModule,
-    CertificationsModule,
-    CertificationModulesModule,
-    WorkerCertificationsModule,
     ReviewsModule,
     FavoritesModule,
   ],
