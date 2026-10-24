@@ -8,11 +8,13 @@ import { WompiService } from './wompi.service';
 import { PayoutAccountService } from './payout-account.service';
 import { MembershipsService } from './memberships.service';
 import { MembershipsController } from './memberships.controller';
+import { TipsService } from './tips.service';
+import { TipsController } from './tips.controller';
 
 @Module({
   imports: [ConfigModule, SupabaseModule, PushNotificationsModule],
-  controllers: [PaymentsController, PaymentsWebhookController, MembershipsController],
-  providers: [PaymentsService, WompiService, PayoutAccountService, MembershipsService],
+  controllers: [PaymentsController, PaymentsWebhookController, MembershipsController, TipsController],
+  providers: [PaymentsService, WompiService, PayoutAccountService, MembershipsService, TipsService],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

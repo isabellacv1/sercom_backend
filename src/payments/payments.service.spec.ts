@@ -69,6 +69,7 @@ function setup(transactions: WompiTransaction[]) {
 
   const push = { sendToUser: jest.fn().mockResolvedValue(undefined) };
   const memberships = { applyWompiTransaction: jest.fn().mockResolvedValue(undefined) };
+  const tips = { applyWompiTransaction: jest.fn().mockResolvedValue(undefined) };
   const service = new PaymentsService(
     { sbRaw: fakeDb(tables) } as any,
     { get: () => undefined } as unknown as ConfigService,
@@ -76,9 +77,10 @@ function setup(transactions: WompiTransaction[]) {
     wompi,
     { findByWorkers: async () => new Map() } as any,
     memberships as any,
+    tips as any,
   );
 
-  return { service, tables, push, memberships };
+  return { service, tables, push, memberships, tips };
 }
 
 const tx = (over: Partial<WompiTransaction>): WompiTransaction => ({
@@ -170,6 +172,14 @@ describe('PaymentsService + Wompi', () => {
     const { service, tables, memberships } = setup([membershipTx]);
     await service.handleWompiEvent(event('tx-mem'));
     expect(memberships.applyWompiTransaction).toHaveBeenCalledWith(membershipTx);
+    expect(tables.payments[0].status).toBe('pending');
+  });
+
+  it('una propina (referencia tip_) se procesa aparte del pago del servicio', async () => {
+    const tipTx = tx({ id: 'tx-tip', reference: 'tip_abc_123' });
+    const { service, tables, tips } = setup([tipTx]);
+    await service.handleWompiEvent(event('tx-tip'));
+    expect(tips.applyWompiTransaction).toHaveBeenCalledWith(tipTx);
     expect(tables.payments[0].status).toBe('pending');
   });
 });

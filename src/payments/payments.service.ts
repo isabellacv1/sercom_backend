@@ -26,6 +26,7 @@ import {
   MEMBERSHIP_REFERENCE_PREFIX,
   MembershipsService,
 } from './memberships.service';
+import { TIP_REFERENCE_PREFIX, TipsService } from './tips.service';
 
 type PaymentStatus =
   | 'pending'
@@ -58,6 +59,7 @@ export class PaymentsService {
     private readonly wompi: WompiService,
     private readonly payoutAccounts: PayoutAccountService,
     private readonly memberships: MembershipsService,
+    private readonly tips: TipsService,
   ) {
     this.frontendUrl =
       this.configService.get<string>('PAYMENTS_FRONTEND_URL') ??
@@ -341,6 +343,12 @@ export class PaymentsService {
       return { received: true };
     }
 
+    // Propina al profesional.
+    if (transaction.reference?.startsWith(TIP_REFERENCE_PREFIX)) {
+      await this.tips.applyWompiTransaction(transaction);
+      return { received: true };
+    }
+
     const paymentId = this.paymentIdFromReference(transaction.reference);
     if (!paymentId) {
       this.logger.warn(
@@ -472,8 +480,13 @@ export class PaymentsService {
 
     if (error) throw new InternalServerErrorException(error.message);
 
+    const pendingTips = await this.tips.pendingPayouts();
     const workerIds = [
-      ...new Set((rows ?? []).map((r) => r.worker_id).filter(Boolean)),
+      ...new Set(
+        [...(rows ?? []), ...pendingTips]
+          .map((r: any) => r.worker_id)
+          .filter(Boolean),
+      ),
     ];
     const { data: workers } = workerIds.length
       ? await this.db
@@ -506,9 +519,27 @@ export class PaymentsService {
       };
     });
 
+    const tips = pendingTips.map((t: any) => {
+      const worker = workerById.get(t.worker_id);
+      return {
+        tip_id: t.id,
+        service_id: t.service_id,
+        service_title: t.services?.title ?? null,
+        worker_id: t.worker_id,
+        worker_name: worker?.full_name ?? null,
+        amount: Number(t.amount ?? 0),
+        paid_at: t.paid_at,
+        payout_account: accountByWorker.get(t.worker_id) ?? null,
+      };
+    });
+
     return {
-      total_pending: payouts.reduce((s, p) => s + p.worker_amount, 0),
+      total_pending:
+        payouts.reduce((s, p) => s + p.worker_amount, 0) +
+        tips.reduce((s, t) => s + t.amount, 0),
       payouts,
+      // Propinas pendientes de transferir (100% del profesional).
+      tips,
     };
   }
 
@@ -753,10 +784,14 @@ export class PaymentsService {
         .filter((p) => p.status === status)
         .reduce((s, p) => s + Number(p.worker_amount ?? 0), 0);
 
+    // Las propinas son 100% del profesional: se suman a su saldo.
+    const tips = await this.tips.workerTipTotals(workerId);
+
     return {
-      available: sum('released'),
+      available: sum('released') + tips.pending,
       in_escrow: sum('held'),
-      total_paid: sum('disbursed'),
+      total_paid: sum('disbursed') + tips.paid_out,
+      tips_total: tips.total,
     };
   }
 
