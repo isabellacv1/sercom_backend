@@ -85,7 +85,7 @@ describe('ServicesService.updateStatus → completed', () => {
       maybeSingle: () => Promise.resolve({ data: { ...inProgress }, error: null }),
     };
     const evidence = { count: jest.fn().mockResolvedValue(evidenceCount) };
-    return new ServicesService({ sb } as never, {} as never, evidence as never);
+    return new ServicesService({ sb } as never, {} as never, evidence as never, {} as never);
   };
 
   it('no deja finalizar sin evidencia', async () => {

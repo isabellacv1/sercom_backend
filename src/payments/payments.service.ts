@@ -27,6 +27,13 @@ import {
   MembershipsService,
 } from './memberships.service';
 import { TIP_REFERENCE_PREFIX, TipsService } from './tips.service';
+import { CouponsService } from './coupons.service';
+import { CreditsService } from './credits.service';
+import { ReferralsService } from './referrals.service';
+import { ApplyDiscountsDto } from './dto/apply-discounts.dto';
+
+/** Wompi necesita un cobro mínimo: los descuentos no bajan de aquí. */
+export const MIN_CHARGE = 2000;
 
 type PaymentStatus =
   | 'pending'
@@ -60,6 +67,9 @@ export class PaymentsService {
     private readonly payoutAccounts: PayoutAccountService,
     private readonly memberships: MembershipsService,
     private readonly tips: TipsService,
+    private readonly coupons: CouponsService,
+    private readonly credits: CreditsService,
+    private readonly referrals: ReferralsService,
   ) {
     this.frontendUrl =
       this.configService.get<string>('PAYMENTS_FRONTEND_URL') ??
@@ -156,6 +166,95 @@ export class PaymentsService {
     });
 
     return this.buildCheckoutResponse(updated, checkoutUrl);
+  }
+
+  // ─── Cupón y saldo SERCOM ───────────────────────────────────────────────────
+
+  /**
+   * Aplica (o quita) cupón y saldo a un pago pendiente. El descuento sale de
+   * la comisión de SerCom: worker_amount no cambia.
+   */
+  async applyDiscounts(clientId: string, serviceId: string, dto: ApplyDiscountsDto) {
+    const { data: payment, error } = await this.db
+      .from('payments')
+      .select('*')
+      .eq('service_id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!payment) throw new NotFoundException('Pago no encontrado');
+    if (payment.status !== 'pending' && payment.status !== 'failed') {
+      throw new BadRequestException('Este pago ya no admite descuentos');
+    }
+    if (payment.provider_status === 'PENDING') {
+      throw new BadRequestException(
+        'Tienes un pago en proceso en Wompi. Espera a que termine para cambiar descuentos.',
+      );
+    }
+
+    const base = Number(payment.amount_before_discount ?? payment.amount_total);
+    const baseCommission = Number(
+      payment.commission_before_discount ?? payment.commission_amount,
+    );
+    const maxDiscount = Math.max(0, base - MIN_CHARGE);
+
+    let couponCode: string | null = null;
+    let couponDiscount = 0;
+    if (dto.coupon_code?.trim()) {
+      const { data: service } = await this.db
+        .from('services')
+        .select('category_id')
+        .eq('id', serviceId)
+        .maybeSingle();
+      const result = await this.coupons.evaluate({
+        code: dto.coupon_code,
+        clientId,
+        categoryId: service?.category_id ?? null,
+        baseAmount: base,
+        paymentId: payment.id,
+      });
+      couponCode = result.coupon.code;
+      couponDiscount = Math.min(result.discount, maxDiscount);
+    }
+
+    let creditApplied = 0;
+    if (dto.use_credit) {
+      const balance = await this.credits.balance(clientId);
+      creditApplied = Math.min(balance, maxDiscount - couponDiscount);
+    }
+
+    const discount = couponDiscount + creditApplied;
+    const { data: updated, error: updateError } = await this.db
+      .from('payments')
+      .update({
+        amount_before_discount: base,
+        commission_before_discount: baseCommission,
+        coupon_code: couponCode,
+        coupon_discount: couponDiscount,
+        credit_applied: creditApplied,
+        amount_total: base - discount,
+        commission_amount: baseCommission - discount,
+        // El link anterior cobraba otro valor: se genera uno nuevo.
+        checkout_url: null,
+        checkout_reference: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', payment.id)
+      .select()
+      .single();
+    if (updateError) throw new InternalServerErrorException(updateError.message);
+
+    return {
+      message: discount > 0 ? 'Descuento aplicado' : 'Descuentos quitados',
+      payment: updated,
+      discount: {
+        coupon_code: couponCode,
+        coupon_discount: couponDiscount,
+        credit_applied: creditApplied,
+        amount_before_discount: base,
+        amount_total: base - discount,
+      },
+    };
   }
 
   // ─── Consultar pago por servicio ────────────────────────────────────────────
@@ -296,6 +395,7 @@ export class PaymentsService {
     });
 
     await this.notifyPaymentHeld(held);
+    await this.afterPaymentHeld(held);
 
     const service = await this.getServiceBasicData(held.service_id);
     return {
@@ -886,6 +986,7 @@ export class PaymentsService {
       });
 
       await this.notifyPaymentHeld(held);
+      await this.afterPaymentHeld(held);
       return held;
     }
 
@@ -964,6 +1065,20 @@ export class PaymentsService {
     }
   }
 
+  /** Pago en custodia: descuenta el saldo usado y premia referidos. */
+  private async afterPaymentHeld(payment: any) {
+    try {
+      await this.credits.consumeForPayment(
+        payment.client_id,
+        payment.id,
+        Number(payment.credit_applied ?? 0),
+      );
+      await this.referrals.onClientPaymentHeld(payment.client_id, payment.id);
+    } catch (err) {
+      this.logger.error(`Post-pago ${payment.id}: ${(err as Error).message}`);
+    }
+  }
+
   private async markReleased(
     payment: any,
     opts: { source: 'admin' | 'system'; changedBy?: string; note?: string },
@@ -997,6 +1112,12 @@ export class PaymentsService {
         opts.note ??
         'Custodia liberada. Pendiente transferencia manual al técnico.',
     });
+
+    if (released.worker_id) {
+      await this.referrals
+        .onWorkerJobCompleted(released.worker_id, released.service_id)
+        .catch((err: Error) => this.logger.error(`Referido técnico: ${err.message}`));
+    }
 
     const svc = await this.getServiceBasicData(released.service_id);
     const label = svc?.title?.trim() || 'tu servicio';
@@ -1159,6 +1280,9 @@ export class PaymentsService {
       scheduled_at: service?.scheduled_at ?? null,
       service_price: payment.service_price ?? payment.amount_total,
       client_fee_amount: payment.client_fee_amount ?? 0,
+      coupon_code: payment.coupon_code ?? null,
+      coupon_discount: payment.coupon_discount ?? 0,
+      credit_applied: payment.credit_applied ?? 0,
       amount_total: payment.amount_total,
       commission_amount: payment.commission_amount,
       worker_amount: payment.worker_amount,

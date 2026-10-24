@@ -10,6 +10,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ServiceEvidenceService } from './service-evidence.service';
 import { getProWorkerIds, proFirst } from '../memberships/pro';
+import { LiveLocationService } from './live-location.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
@@ -27,6 +28,7 @@ export class ServicesService {
     private readonly supabaseService: SupabaseService,
     private readonly paymentsService: PaymentsService,
     private readonly evidenceService: ServiceEvidenceService,
+    private readonly liveLocation: LiveLocationService,
   ) {}
 
   async createPreRequest(clientId: string, dto: CreatePreServiceRequestDto) {
@@ -359,6 +361,11 @@ export class ServicesService {
       throw new InternalServerErrorException(
         'No se pudo actualizar el estado del servicio',
       );
+    }
+
+    // Privacidad: al llegar ya no se guarda la ubicación del profesional.
+    if (nextStatus !== 'on_the_way') {
+      await this.liveLocation.clear(serviceId);
     }
 
     const historyResponse = await this.supabaseService.sb

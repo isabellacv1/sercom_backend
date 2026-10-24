@@ -20,6 +20,7 @@ import type { WompiEvent } from './wompi.service';
 import { PayoutAccountService } from './payout-account.service';
 import { PayoutAccountDto } from './dto/payout-account.dto';
 import { getFeeRates } from './fees';
+import { ApplyDiscountsDto } from './dto/apply-discounts.dto';
 
 type JwtUser = { sub: string };
 
@@ -81,6 +82,17 @@ export class PaymentsController {
   @Get('admin/payouts')
   listPendingPayouts(@CurrentUser() user: JwtUser) {
     return this.paymentsService.listPendingPayouts(user.sub);
+  }
+
+  // ─── Cupón y saldo SERCOM antes de pagar ─────────────────────────────────
+
+  @Post('service/:serviceId/discounts')
+  applyDiscounts(
+    @CurrentUser() user: JwtUser,
+    @Param('serviceId') serviceId: string,
+    @Body() dto: ApplyDiscountsDto,
+  ) {
+    return this.paymentsService.applyDiscounts(user.sub, serviceId, dto);
   }
 
   // ─── Wallet y balance del trabajador ─────────────────────────────────────

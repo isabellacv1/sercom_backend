@@ -55,7 +55,7 @@ function setup(transactions: WompiTransaction[]) {
       },
     ],
     payment_audit_logs: [],
-    services: [{ id: 'svc-1', title: 'Arreglo eléctrico' }],
+    services: [{ id: 'svc-1', title: 'Arreglo eléctrico', category_id: null }],
   };
 
   const byId = new Map(transactions.map((t) => [t.id, t]));
@@ -78,6 +78,14 @@ function setup(transactions: WompiTransaction[]) {
     { findByWorkers: async () => new Map() } as any,
     memberships as any,
     tips as any,
+    {
+      evaluate: async ({ baseAmount }: { baseAmount: number }) => ({
+        coupon: { code: 'BIENVENIDO' },
+        discount: Math.round(baseAmount * 0.2),
+      }),
+    } as any,
+    { balance: async () => 10000, consumeForPayment: jest.fn() } as any,
+    { onClientPaymentHeld: jest.fn(), onWorkerJobCompleted: jest.fn().mockResolvedValue(undefined) } as any,
   );
 
   return { service, tables, push, memberships, tips };
@@ -181,5 +189,39 @@ describe('PaymentsService + Wompi', () => {
     await service.handleWompiEvent(event('tx-tip'));
     expect(tips.applyWompiTransaction).toHaveBeenCalledWith(tipTx);
     expect(tables.payments[0].status).toBe('pending');
+  });
+
+  it('cupón y saldo bajan el cobro; el técnico recibe lo mismo y SerCom asume el descuento', async () => {
+    const { service, tables } = setup([]);
+    Object.assign(tables.payments[0], {
+      amount_total: 105000,
+      commission_amount: 15000,
+      worker_amount: 90000,
+    });
+
+    const res = await service.applyDiscounts('client-1', 'svc-1', {
+      coupon_code: 'BIENVENIDO',
+      use_credit: true,
+    });
+
+    expect(res.discount).toEqual({
+      coupon_code: 'BIENVENIDO',
+      coupon_discount: 21000,
+      credit_applied: 10000,
+      amount_before_discount: 105000,
+      amount_total: 74000,
+    });
+    expect(tables.payments[0].worker_amount).toBe(90000);
+    expect(tables.payments[0].commission_amount).toBe(15000 - 31000);
+  });
+
+  it('los descuentos nunca dejan el cobro por debajo de $2.000', async () => {
+    const { service, tables } = setup([]);
+    Object.assign(tables.payments[0], { amount_total: 5000, commission_amount: 700, worker_amount: 4300 });
+
+    const res = await service.applyDiscounts('client-1', 'svc-1', { use_credit: true });
+
+    expect(res.discount.amount_total).toBe(2000);
+    expect(res.discount.credit_applied).toBe(3000);
   });
 });

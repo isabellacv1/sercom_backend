@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ServicesController } from './services.controller';
 import { ServicesService } from './services.service';
 import { ServiceEvidenceService } from './service-evidence.service';
+import { LiveLocationService } from './live-location.service';
 
 describe('ServicesController', () => {
   let instance: ServicesController;
@@ -12,6 +13,7 @@ describe('ServicesController', () => {
       providers: [
         { provide: ServicesService, useValue: {} },
         { provide: ServiceEvidenceService, useValue: {} },
+        { provide: LiveLocationService, useValue: {} },
       ],
     }).compile();
 

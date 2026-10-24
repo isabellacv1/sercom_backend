@@ -16,6 +16,8 @@ import {
   MAX_EVIDENCE_PER_SERVICE,
   ServiceEvidenceService,
 } from './service-evidence.service';
+import { LiveLocationService } from './live-location.service';
+import { UpdateLocationDto } from './dto/update-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as currentUserDecorator from '../auth/decorators/current-user.decorator';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -33,6 +35,7 @@ export class ServicesController {
   constructor(
     private readonly servicesService: ServicesService,
     private readonly evidenceService: ServiceEvidenceService,
+    private readonly liveLocation: LiveLocationService,
   ) {}
 
   @Get('opportunities')
@@ -107,6 +110,24 @@ export class ServicesController {
     @Param('id') id: string,
   ) {
     return this.evidenceService.list(user.sub, id);
+  }
+
+  // Ubicación en vivo del profesional mientras va en camino.
+  @Post(':id/location')
+  updateLocation(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateLocationDto,
+  ) {
+    return this.liveLocation.update(user.sub, id, dto);
+  }
+
+  @Get(':id/location')
+  getLocation(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.liveLocation.get(user.sub, id);
   }
 
   @Patch(':id/confirm')

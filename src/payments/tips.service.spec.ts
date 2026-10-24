@@ -44,7 +44,7 @@ const tx = (over: Partial<WompiTransaction> = {}): WompiTransaction => ({
 });
 
 function setup() {
-  const tables = { service_tips: [tipRow()] };
+  const tables: Record<string, any[]> = { service_tips: [tipRow()] };
   const push = { sendToUser: jest.fn().mockResolvedValue(undefined) };
   const service = new TipsService(
     { sbRaw: fakeDb(tables) } as any,
