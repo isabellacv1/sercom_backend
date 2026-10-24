@@ -1,5 +1,13 @@
 import { computePaymentAmounts } from '../payments/fees';
 import {
+  feeRatesForWorker,
+  getProConfig,
+  getProWorkerIds,
+  isProWorker,
+  proFirst,
+  proposalsThisMonth,
+} from '../memberships/pro';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -55,6 +63,19 @@ export class ProposalsService {
       throw new ConflictException(
         'Ya has enviado una propuesta para este servicio',
       );
+    }
+
+    // Plan gratuito: propuestas limitadas por mes; SERCOM Pro, ilimitadas.
+    const db = this.supabaseService.sbRaw;
+    if (!(await isProWorker(db, technicianId))) {
+      const { freeMonthlyProposals } = getProConfig();
+      if ((await proposalsThisMonth(db, technicianId)) >= freeMonthlyProposals) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          error: 'PROPOSAL_LIMIT_REACHED',
+          message: `Llegaste al límite de ${freeMonthlyProposals} propuestas de este mes. Con SERCOM Pro envías propuestas ilimitadas.`,
+        });
+      }
     }
 
     const proposalToInsert: any = {
@@ -155,7 +176,14 @@ export class ProposalsService {
       throw new InternalServerErrorException(proposalsResponse.error.message);
     }
 
-    const proposals = proposalsResponse.data ?? [];
+    const proSet = await getProWorkerIds(
+      this.supabaseService.sbRaw,
+      (proposalsResponse.data ?? []).map((p: any) => p.technician_id),
+    );
+    // Los profesionales Pro aparecen primero.
+    const proposals = proFirst(proposalsResponse.data ?? [], (p: any) =>
+      proSet.has(p.technician_id),
+    );
 
     return {
       message: 'Propuestas obtenidas exitosamente',
@@ -178,6 +206,7 @@ export class ProposalsService {
           rating: Number(proposal.profiles?.rating_avg ?? 0),
           ratingCount: Number(proposal.profiles?.rating_count ?? 0),
           profileImageUrl: proposal.profiles?.profile_image_url ?? null,
+          isPro: proSet.has(proposal.technician_id),
         },
       })),
     };
@@ -361,7 +390,10 @@ export class ProposalsService {
       );
     }
 
-    const amounts = computePaymentAmounts(servicePrice);
+    const amounts = computePaymentAmounts(
+      servicePrice,
+      await feeRatesForWorker(this.supabaseService.sbRaw, proposal.technician_id),
+    );
 
     const existingPaymentResponse = await this.supabaseService.sb
       .from('payments')

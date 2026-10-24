@@ -9,6 +9,7 @@ import {
 import { SupabaseService } from '../supabase/supabase.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ServiceEvidenceService } from './service-evidence.service';
+import { getProWorkerIds, proFirst } from '../memberships/pro';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
@@ -896,12 +897,24 @@ export class ServicesService {
         return true;
       }) ?? [];
 
+    const proSet = await getProWorkerIds(
+      this.supabaseService.sbRaw,
+      filteredWorkers.map((item: any) => item.worker?.id),
+    );
+
     return {
       service_id: service.id,
       category_id: service.category_id,
       service_option_id: service.service_option_id,
       city: service.city,
-      candidates: filteredWorkers,
+      // Los profesionales Pro aparecen primero en la búsqueda.
+      candidates: proFirst(
+        filteredWorkers.map((item: any) => ({
+          ...item,
+          is_pro: proSet.has(item.worker?.id),
+        })),
+        (item: any) => item.is_pro,
+      ),
     };
   }
 

@@ -68,15 +68,17 @@ function setup(transactions: WompiTransaction[]) {
   } as unknown as WompiService;
 
   const push = { sendToUser: jest.fn().mockResolvedValue(undefined) };
+  const memberships = { applyWompiTransaction: jest.fn().mockResolvedValue(undefined) };
   const service = new PaymentsService(
     { sbRaw: fakeDb(tables) } as any,
     { get: () => undefined } as unknown as ConfigService,
     push as any,
     wompi,
     { findByWorkers: async () => new Map() } as any,
+    memberships as any,
   );
 
-  return { service, tables, push };
+  return { service, tables, push, memberships };
 }
 
 const tx = (over: Partial<WompiTransaction>): WompiTransaction => ({
@@ -161,5 +163,13 @@ describe('PaymentsService + Wompi', () => {
     await service.disburseWorkerPayment('svc-1');
     expect(tables.payments[0].status).toBe('released');
     expect(tables.payments[0].payout_status).toBe('pending_manual');
+  });
+
+  it('un pago de SERCOM Pro (referencia mem_) no toca los pagos de servicios', async () => {
+    const membershipTx = tx({ id: 'tx-mem', reference: 'mem_abc_123' });
+    const { service, tables, memberships } = setup([membershipTx]);
+    await service.handleWompiEvent(event('tx-mem'));
+    expect(memberships.applyWompiTransaction).toHaveBeenCalledWith(membershipTx);
+    expect(tables.payments[0].status).toBe('pending');
   });
 });

@@ -22,6 +22,10 @@ import { ReleasePaymentDto } from './dto/release-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { CompletePayoutDto } from './dto/complete-payout.dto';
 import { PayoutAccountService } from './payout-account.service';
+import {
+  MEMBERSHIP_REFERENCE_PREFIX,
+  MembershipsService,
+} from './memberships.service';
 
 type PaymentStatus =
   | 'pending'
@@ -53,6 +57,7 @@ export class PaymentsService {
     private readonly pushService: PushNotificationsService,
     private readonly wompi: WompiService,
     private readonly payoutAccounts: PayoutAccountService,
+    private readonly memberships: MembershipsService,
   ) {
     this.frontendUrl =
       this.configService.get<string>('PAYMENTS_FRONTEND_URL') ??
@@ -328,6 +333,12 @@ export class PaymentsService {
       );
       // 5xx para que Wompi reintente el evento.
       throw new ServiceUnavailableException('No se pudo verificar la transacción');
+    }
+
+    // Pago de SERCOM Pro (no de un servicio).
+    if (transaction.reference?.startsWith(MEMBERSHIP_REFERENCE_PREFIX)) {
+      await this.memberships.applyWompiTransaction(transaction);
+      return { received: true };
     }
 
     const paymentId = this.paymentIdFromReference(transaction.reference);

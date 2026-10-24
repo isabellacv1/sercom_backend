@@ -1,4 +1,5 @@
 import { computePaymentAmounts } from '../payments/fees';
+import { feeRatesForWorker } from '../memberships/pro';
 import {
   BadRequestException,
   ForbiddenException,
@@ -291,7 +292,10 @@ export class ServiceAssignmentsService {
         );
       }
 
-      const amounts = computePaymentAmounts(servicePrice);
+      const amounts = computePaymentAmounts(
+        servicePrice,
+        await feeRatesForWorker(this.supabaseService.sbRaw, assignment.worker_id),
+      );
 
       const { data: existingPayment, error: existingPaymentError } =
         await supabase
