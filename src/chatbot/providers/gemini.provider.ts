@@ -133,9 +133,14 @@ export class GeminiProvider {
       this.logger.error(
         `[${this.model}] Error inesperado al generar respuesta (status ${error?.status ?? '?'}): ${error?.message ?? error}`,
       );
-      throw new InternalServerErrorException(
-        'Error generando respuesta del asistente.',
-      );
+      // El detalle (de Google) va en la respuesta para diagnosticar; la app
+      // muestra al usuario un mensaje genérico.
+      throw new InternalServerErrorException({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Error generando respuesta del asistente.',
+        detail: `[${this.model}] status ${error?.status ?? '?'}: ${String(error?.message ?? error).slice(0, 300)}`,
+      });
     }
   }
 
