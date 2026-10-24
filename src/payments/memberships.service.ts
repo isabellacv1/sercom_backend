@@ -10,10 +10,23 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { WompiService, WompiTransaction } from './wompi.service';
 import {
+  getPlusConfig,
   getProConfig,
   isProWorker,
   proposalsThisMonth,
 } from '../memberships/pro';
+
+/** pro = profesionales; plus = clientes (como Rappi Prime). */
+export type MembershipPlan = 'pro' | 'plus';
+
+function planConfig(plan: MembershipPlan) {
+  if (plan === 'plus') {
+    const c = getPlusConfig();
+    return { name: 'SERCOM Plus', monthlyPrice: c.monthlyPrice, periodDays: c.periodDays };
+  }
+  const c = getProConfig();
+  return { name: 'SERCOM Pro', monthlyPrice: c.monthlyPrice, periodDays: c.periodDays };
+}
 
 /** Prefijo de las referencias Wompi de membresía (las de servicios son uuid). */
 export const MEMBERSHIP_REFERENCE_PREFIX = 'mem_';
@@ -42,6 +55,38 @@ export class MembershipsService {
     return this.supabaseService.sbRaw;
   }
 
+  /** Estado de SERCOM Plus del cliente. */
+  async getPlus(userId: string) {
+    await this.syncPending(userId);
+    const config = getPlusConfig();
+    const active = await this.activeMembership(userId, 'plus');
+    return {
+      is_plus: !!active,
+      period_end: active?.period_end ?? null,
+      plan: {
+        name: 'SERCOM Plus',
+        monthly_price: config.monthlyPrice,
+        period_days: config.periodDays,
+        warranty_days: config.warrantyDays,
+        standard_warranty_days: config.standardWarrantyDays,
+      },
+    };
+  }
+
+  private async activeMembership(userId: string, plan: MembershipPlan) {
+    const { data } = await this.db
+      .from('worker_memberships')
+      .select('id, period_start, period_end')
+      .eq('worker_id', userId)
+      .eq('plan', plan)
+      .eq('status', 'active')
+      .gt('period_end', new Date().toISOString())
+      .order('period_end', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return data;
+  }
+
   async getMine(workerId: string) {
     await this.requireWorker(workerId);
     await this.syncPending(workerId);
@@ -51,6 +96,7 @@ export class MembershipsService {
       .from('worker_memberships')
       .select('id, period_start, period_end')
       .eq('worker_id', workerId)
+      .eq('plan', 'pro')
       .eq('status', 'active')
       .gt('period_end', new Date().toISOString())
       .order('period_end', { ascending: false })
@@ -71,16 +117,17 @@ export class MembershipsService {
     };
   }
 
-  async createCheckout(workerId: string) {
+  async createCheckout(workerId: string, plan: MembershipPlan = 'pro') {
     if (!this.wompi.isConfigured) {
       throw new ServiceUnavailableException('Los pagos no están configurados');
     }
-    const profile = await this.requireWorker(workerId);
-    const { monthlyPrice } = getProConfig();
+    const profile =
+      plan === 'pro' ? await this.requireWorker(workerId) : await this.requireProfile(workerId);
+    const { monthlyPrice } = planConfig(plan);
 
     const { data: row, error } = await this.db
       .from('worker_memberships')
-      .insert({ worker_id: workerId, plan: 'pro', status: 'pending', amount: monthlyPrice })
+      .insert({ worker_id: workerId, plan, status: 'pending', amount: monthlyPrice })
       .select('id')
       .single();
     if (error) throw new InternalServerErrorException(error.message);
@@ -132,18 +179,20 @@ export class MembershipsService {
         return;
       }
 
-      // Si ya era Pro, el nuevo periodo empieza cuando termina el vigente.
+      // Si ya tenía el plan, el nuevo periodo empieza cuando termina el vigente.
+      const plan: MembershipPlan = row.plan === 'plus' ? 'plus' : 'pro';
       const { data: current } = await this.db
         .from('worker_memberships')
         .select('period_end')
         .eq('worker_id', row.worker_id)
+        .eq('plan', plan)
         .eq('status', 'active')
         .gt('period_end', now.toISOString())
         .order('period_end', { ascending: false })
         .limit(1)
         .maybeSingle();
       const start = current?.period_end ? new Date(current.period_end) : now;
-      const end = new Date(start.getTime() + getProConfig().periodDays * 86400000);
+      const end = new Date(start.getTime() + planConfig(plan).periodDays * 86400000);
 
       const { data: activated } = await this.db
         .from('worker_memberships')
@@ -161,11 +210,20 @@ export class MembershipsService {
         .maybeSingle();
 
       if (activated) {
-        await this.pushService.sendToUser(row.worker_id, {
-          title: '¡Ya eres SERCOM Pro!',
-          body: 'Apareces primero, pagas menos comisión y envías propuestas sin límite.',
-          data: { type: 'membership_active' },
-        });
+        await this.pushService.sendToUser(
+          row.worker_id,
+          plan === 'plus'
+            ? {
+                title: '¡Ya eres SERCOM Plus!',
+                body: 'Sin tarifa de servicio, atención prioritaria y garantía extendida.',
+                data: { type: 'membership_active', plan },
+              }
+            : {
+                title: '¡Ya eres SERCOM Pro!',
+                body: 'Apareces primero, pagas menos comisión y envías propuestas sin límite.',
+                data: { type: 'membership_active', plan },
+              },
+        );
       }
       return;
     }
@@ -204,6 +262,16 @@ export class MembershipsService {
         this.logger.warn(`No se pudo sincronizar membresía ${row.id}: ${(err as Error).message}`);
       }
     }
+  }
+
+  private async requireProfile(userId: string) {
+    const { data } = await this.db
+      .from('profiles')
+      .select('id, email, full_name')
+      .eq('id', userId)
+      .maybeSingle();
+    if (!data) throw new ForbiddenException('Perfil no encontrado');
+    return data;
   }
 
   private async requireWorker(workerId: string) {

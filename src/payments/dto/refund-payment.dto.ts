@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class RefundPaymentDto {
   @IsOptional()
@@ -14,4 +14,9 @@ export class RefundPaymentDto {
   @IsString()
   @MaxLength(120)
   manual_reference?: string;
+
+  /** Devolver como saldo SERCOM (inmediato) en vez de dinero. */
+  @IsOptional()
+  @IsBoolean()
+  as_credit?: boolean;
 }

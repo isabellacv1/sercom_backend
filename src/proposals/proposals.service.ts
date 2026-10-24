@@ -1,6 +1,6 @@
 import { computePaymentAmounts } from '../payments/fees';
 import {
-  feeRatesForWorker,
+  feeRatesFor,
   getProConfig,
   getProWorkerIds,
   isProWorker,
@@ -24,9 +24,9 @@ export class ProposalsService {
   constructor(private readonly supabaseService: SupabaseService) {}
 
   async create(technicianId: string, dto: CreateProposalDto) {
-    const serviceResponse = await this.supabaseService.sb
+    const serviceResponse = await this.supabaseService.sbRaw
       .from('services')
-      .select('id, status')
+      .select('id, status, preferred_worker_id, reserved_until')
       .eq('id', dto.service_id)
       .maybeSingle();
 
@@ -43,6 +43,19 @@ export class ProposalsService {
     if (status !== 'requested') {
       throw new BadRequestException(
         'El servicio no está recibiendo postulaciones',
+      );
+    }
+
+    // "Repetir con el mismo profesional": reservado para él por unas horas.
+    const { preferred_worker_id, reserved_until } = serviceResponse.data as any;
+    if (
+      preferred_worker_id &&
+      preferred_worker_id !== technicianId &&
+      reserved_until &&
+      new Date(reserved_until).getTime() > Date.now()
+    ) {
+      throw new ForbiddenException(
+        'Esta solicitud está reservada para otro profesional por unas horas',
       );
     }
 
@@ -392,7 +405,10 @@ export class ProposalsService {
 
     const amounts = computePaymentAmounts(
       servicePrice,
-      await feeRatesForWorker(this.supabaseService.sbRaw, proposal.technician_id),
+      await feeRatesFor(this.supabaseService.sbRaw, {
+        workerId: proposal.technician_id,
+        clientId,
+      }),
     );
 
     const existingPaymentResponse = await this.supabaseService.sb

@@ -40,6 +40,7 @@ export async function getProWorkerIds(db: Db, workerIds: string[]): Promise<Set<
     .from('worker_memberships')
     .select('worker_id')
     .in('worker_id', ids)
+    .eq('plan', 'pro')
     .eq('status', 'active')
     .gt('period_end', new Date().toISOString());
   return new Set((data ?? []).map((r: { worker_id: string }) => r.worker_id));
@@ -49,13 +50,59 @@ export async function isProWorker(db: Db, workerId: string): Promise<boolean> {
   return (await getProWorkerIds(db, [workerId])).has(workerId);
 }
 
-/** Tasas a cobrar en un servicio de este profesional (Pro paga menos). */
-export async function feeRatesForWorker(db: Db, workerId: string): Promise<FeeRates> {
-  const rates = getFeeRates();
-  if (!(await isProWorker(db, workerId))) return rates;
+/**
+ * SERCOM Plus: membresía mensual para clientes (como Rappi Prime).
+ *  - sin tarifa de servicio
+ *  - atención prioritaria en soporte
+ *  - garantía extendida (PLUS_WARRANTY_DAYS) para reportar problemas
+ */
+export interface PlusConfig {
+  monthlyPrice: number;
+  periodDays: number;
+  warrantyDays: number;
+  standardWarrantyDays: number;
+}
+
+export function getPlusConfig(): PlusConfig {
   return {
-    ...rates,
-    workerCommissionRate: Math.min(rates.workerCommissionRate, getProConfig().workerCommissionRate),
+    monthlyPrice: Math.round(readNumber('PLUS_MONTHLY_PRICE', 14900, 1000, 1000000)),
+    periodDays: Math.round(readNumber('PLUS_PERIOD_DAYS', 30, 1, 366)),
+    warrantyDays: Math.round(readNumber('PLUS_WARRANTY_DAYS', 30, 1, 365)),
+    standardWarrantyDays: Math.round(readNumber('STANDARD_WARRANTY_DAYS', 7, 1, 365)),
+  };
+}
+
+export async function isPlusClient(db: Db, userId: string): Promise<boolean> {
+  const { data } = await db
+    .from('worker_memberships')
+    .select('id')
+    .eq('worker_id', userId)
+    .eq('plan', 'plus')
+    .eq('status', 'active')
+    .gt('period_end', new Date().toISOString())
+    .limit(1)
+    .maybeSingle();
+  return !!data;
+}
+
+/**
+ * Tasas de un servicio: el profesional Pro paga menos comisión y el cliente
+ * Plus no paga tarifa de servicio.
+ */
+export async function feeRatesFor(
+  db: Db,
+  parties: { workerId: string; clientId: string },
+): Promise<FeeRates> {
+  const rates = getFeeRates();
+  const [pro, plus] = await Promise.all([
+    isProWorker(db, parties.workerId),
+    isPlusClient(db, parties.clientId),
+  ]);
+  return {
+    clientFeeRate: plus ? 0 : rates.clientFeeRate,
+    workerCommissionRate: pro
+      ? Math.min(rates.workerCommissionRate, getProConfig().workerCommissionRate)
+      : rates.workerCommissionRate,
   };
 }
 

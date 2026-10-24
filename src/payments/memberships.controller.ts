@@ -20,6 +20,20 @@ export class MembershipsController {
   @Auth(AppRoles.WORKER)
   @Post('pro/checkout')
   checkout(@CurrentUser() user: JwtUser) {
-    return this.memberships.createCheckout(user.sub);
+    return this.memberships.createCheckout(user.sub, 'pro');
+  }
+
+  // GET /memberships/plus — SERCOM Plus del cliente
+  @Auth()
+  @Get('plus')
+  getPlus(@CurrentUser() user: JwtUser) {
+    return this.memberships.getPlus(user.sub);
+  }
+
+  // POST /memberships/plus/checkout — link de pago Wompi
+  @Auth()
+  @Post('plus/checkout')
+  checkoutPlus(@CurrentUser() user: JwtUser) {
+    return this.memberships.createCheckout(user.sub, 'plus');
   }
 }

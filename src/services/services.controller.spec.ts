@@ -3,6 +3,7 @@ import { ServicesController } from './services.controller';
 import { ServicesService } from './services.service';
 import { ServiceEvidenceService } from './service-evidence.service';
 import { LiveLocationService } from './live-location.service';
+import { RepeatService } from './repeat.service';
 
 describe('ServicesController', () => {
   let instance: ServicesController;
@@ -14,6 +15,7 @@ describe('ServicesController', () => {
         { provide: ServicesService, useValue: {} },
         { provide: ServiceEvidenceService, useValue: {} },
         { provide: LiveLocationService, useValue: {} },
+        { provide: RepeatService, useValue: {} },
       ],
     }).compile();
 

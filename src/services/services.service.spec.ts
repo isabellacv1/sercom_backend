@@ -4,6 +4,7 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ServiceEvidenceService } from './service-evidence.service';
 import { LiveLocationService } from './live-location.service';
+import { RepeatService } from './repeat.service';
 
 describe('ServicesService', () => {
   let instance: ServicesService;
@@ -16,6 +17,7 @@ describe('ServicesService', () => {
         { provide: PaymentsService, useValue: {} },
         { provide: ServiceEvidenceService, useValue: {} },
         { provide: LiveLocationService, useValue: {} },
+        { provide: RepeatService, useValue: {} },
       ],
     }).compile();
 

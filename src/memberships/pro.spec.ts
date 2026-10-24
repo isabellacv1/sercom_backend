@@ -1,4 +1,4 @@
-import { getProConfig, proFirst, startOfMonthCO } from './pro';
+import { feeRatesFor, getProConfig, proFirst, startOfMonthCO } from './pro';
 
 describe('SERCOM Pro', () => {
   const original = { ...process.env };
@@ -40,5 +40,49 @@ describe('SERCOM Pro', () => {
     expect(startOfMonthCO(new Date('2026-11-01T02:00:00Z')).toISOString()).toBe(
       '2026-10-01T05:00:00.000Z',
     );
+  });
+
+  describe('tarifas según membresías', () => {
+    /** Membresías activas: [usuario, plan]. */
+    const db = (active: [string, 'pro' | 'plus'][]) =>
+      ({
+        from: () => {
+          const f: Record<string, any> = {};
+          const q: any = {
+            select: () => q,
+            in: (_c: string, v: string[]) => ((f.ids = v), q),
+            eq: (c: string, v: any) => ((f[c] = v), q),
+            gt: () => q,
+            limit: () => q,
+            matches: () =>
+              active.filter(
+                ([u, plan]) =>
+                  plan === f.plan && (f.ids ? f.ids.includes(u) : u === f.worker_id),
+              ),
+            maybeSingle: () => Promise.resolve({ data: q.matches()[0] ? { id: 'm' } : null }),
+            then: (r: any) => r({ data: q.matches().map(([u]: [string]) => ({ worker_id: u })) }),
+          };
+          return q;
+        },
+      }) as any;
+
+    it('sin membresías: 5% al cliente, 10% al técnico', async () => {
+      expect(await feeRatesFor(db([]), { workerId: 'w', clientId: 'c' })).toEqual({
+        clientFeeRate: 0.05,
+        workerCommissionRate: 0.1,
+      });
+    });
+
+    it('cliente Plus no paga tarifa; técnico Pro paga 7%', async () => {
+      expect(
+        await feeRatesFor(db([['c', 'plus'], ['w', 'pro']]), { workerId: 'w', clientId: 'c' }),
+      ).toEqual({ clientFeeRate: 0, workerCommissionRate: 0.07 });
+    });
+
+    it('un Plus de cliente no convierte en Pro a esa persona como técnico', async () => {
+      expect(
+        await feeRatesFor(db([['w', 'plus']]), { workerId: 'w', clientId: 'c' }),
+      ).toEqual({ clientFeeRate: 0.05, workerCommissionRate: 0.1 });
+    });
   });
 });

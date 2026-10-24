@@ -11,6 +11,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { ServiceEvidenceService } from './service-evidence.service';
 import { getProWorkerIds, proFirst } from '../memberships/pro';
 import { LiveLocationService } from './live-location.service';
+import { RepeatService } from './repeat.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
@@ -29,7 +30,13 @@ export class ServicesService {
     private readonly paymentsService: PaymentsService,
     private readonly evidenceService: ServiceEvidenceService,
     private readonly liveLocation: LiveLocationService,
+    private readonly repeatService: RepeatService,
   ) {}
+
+  /** Reservada para otro profesional (repetición) durante RESERVATION_HOURS. */
+  private reservedFilter(userId: string) {
+    return `preferred_worker_id.is.null,preferred_worker_id.eq.${userId},reserved_until.lt.${new Date().toISOString()}`;
+  }
 
   async createPreRequest(clientId: string, dto: CreatePreServiceRequestDto) {
     const categoryResponse = await this.supabaseService.sb
@@ -734,6 +741,9 @@ export class ServicesService {
   }
 
   async findMine(clientId: string) {
+    // Respaldo del temporizador: crea las recurrencias vencidas del cliente.
+    void this.repeatService.processDue(clientId).catch(() => undefined);
+
     const response = await this.supabaseService.sb
       .from('services')
       .select(
@@ -942,7 +952,7 @@ export class ServicesService {
       // 'active' o cualquier valor desconocido: solo solicitudes abiertas.
       // Antes un filtro no reconocido devolvía todos los servicios (con
       // direcciones y estados de otros clientes y profesionales).
-      query = query.eq('status', 'requested');
+      query = query.eq('status', 'requested').or(this.reservedFilter(userId));
     }
 
     const { data, error } = await query.order('created_at', {
@@ -1140,6 +1150,7 @@ export class ServicesService {
         .eq('status', 'requested')
         .is('assigned_worker_id', null)
         .neq('client_id', userId)
+        .or(this.reservedFilter(userId))
         .order('created_at', { ascending: false });
 
       if (query.city?.trim()) {

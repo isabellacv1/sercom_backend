@@ -728,6 +728,13 @@ export class PaymentsService {
 
     let refundReference: string | null = dto.manual_reference ?? null;
 
+    // Reembolso como saldo SERCOM: lo pagado (y el saldo usado) vuelve a la app.
+    if (payment.status === 'held' && dto.as_credit) {
+      const amount = Number(payment.amount_total) + Number(payment.credit_applied ?? 0);
+      await this.credits.add(payment.client_id, amount, 'Reembolso de un servicio', payment.id);
+      refundReference = 'SALDO_SERCOM';
+    }
+
     if (payment.status === 'held' && !refundReference) {
       // Wompi solo permite anular pagos con tarjeta; Nequi, PSE, Bancolombia,
       // etc. se devuelven por transferencia y se registran con manual_reference.
@@ -751,6 +758,21 @@ export class PaymentsService {
           'Este medio de pago no admite anulación automática. Devuelve el dinero al cliente por transferencia y registra el reembolso con manual_reference.',
         );
       }
+    }
+
+    // Reembolso por el medio original: el saldo SERCOM usado vuelve como saldo
+    // (solo después de que la devolución del dinero quedó registrada).
+    if (
+      payment.status === 'held' &&
+      !dto.as_credit &&
+      Number(payment.credit_applied ?? 0) > 0
+    ) {
+      await this.credits.add(
+        payment.client_id,
+        Number(payment.credit_applied),
+        'Devolución del saldo usado',
+        payment.id,
+      );
     }
 
     const now = new Date().toISOString();

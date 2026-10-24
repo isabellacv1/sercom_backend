@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -18,6 +19,8 @@ import {
 } from './service-evidence.service';
 import { LiveLocationService } from './live-location.service';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { RepeatService } from './repeat.service';
+import { CreateRecurrenceDto, RepeatServiceDto } from './dto/repeat-service.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as currentUserDecorator from '../auth/decorators/current-user.decorator';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -36,7 +39,43 @@ export class ServicesController {
     private readonly servicesService: ServicesService,
     private readonly evidenceService: ServiceEvidenceService,
     private readonly liveLocation: LiveLocationService,
+    private readonly repeatService: RepeatService,
   ) {}
+
+  // ─── Volver a pedir y servicios recurrentes ──────────────────────────────
+
+  @Post(':id/repeat')
+  repeat(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() dto: RepeatServiceDto,
+  ) {
+    return this.repeatService.repeat(user.sub, id, dto);
+  }
+
+  @Post(':id/recurrence')
+  createRecurrence(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+    @Body() dto: CreateRecurrenceDto,
+  ) {
+    return this.repeatService.createRecurrence(user.sub, id, dto);
+  }
+
+  @Get('recurrences/me')
+  listRecurrences(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+  ) {
+    return this.repeatService.listRecurrences(user.sub);
+  }
+
+  @Delete('recurrences/:id')
+  cancelRecurrence(
+    @currentUserDecorator.CurrentUser() user: currentUserDecorator.JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.repeatService.cancelRecurrence(user.sub, id);
+  }
 
   @Get('opportunities')
   findOpportunities(
