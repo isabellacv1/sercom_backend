@@ -1,4 +1,7 @@
 import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -9,10 +12,43 @@ import { GeminiProvider } from './providers/gemini.provider';
 import { SupabaseService } from '../supabase/supabase.service';
 import { ResolveDraftDto } from './dto/resolve-draft.dto';
 import { buildSystemPrompt, ChatbotUserContext } from './utils/chatbot-prompts';
+import { buildPhotoQuotePrompt } from './utils/photo-quote-prompt';
+import type { MulterFile } from '../common/types/multer.types';
 import { getFeeRates } from '../payments/fees';
 import { getPlusConfig, getProConfig, isPlusClient, isProWorker } from '../memberships/pro';
 
 const CATALOG_TTL_MS = 10 * 60 * 1000;
+const PHOTO_QUOTES_PER_DAY = 15;
+const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
+
+/** Limpia la respuesta del modelo: precios enteros y razonables. */
+export function sanitizePhotoQuote(raw: any) {
+  const price = (v: unknown) => {
+    const n = Math.round(Number(v) / 1000) * 1000;
+    return Number.isFinite(n) && n > 0 ? Math.min(Math.max(n, 20000), 5000000) : null;
+  };
+  let min = price(raw?.price_min);
+  let max = price(raw?.price_max);
+  if (min && max && min > max) [min, max] = [max, min];
+  if (min && !max) max = min;
+  if (max && !min) min = max;
+  const text = (v: unknown, len: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, len) : null);
+  const isHome = raw?.is_home_issue !== false;
+  return {
+    is_home_issue: isHome,
+    category: isHome ? text(raw?.category, 80) : null,
+    serviceType: isHome ? text(raw?.serviceType, 120) : null,
+    title: text(raw?.title, 80),
+    diagnosis: text(raw?.diagnosis, 400),
+    description: text(raw?.description, 500),
+    price_min: isHome ? min : null,
+    price_max: isHome ? max : null,
+    urgent: raw?.urgent === true,
+    safety_warning: text(raw?.safety_warning, 300),
+    tips: Array.isArray(raw?.tips) ? raw.tips.filter((t: unknown) => typeof t === 'string').slice(0, 4) : [],
+    confidence: Math.min(Math.max(Number(raw?.confidence) || 0, 0), 1),
+  };
+}
 
 @Injectable()
 export class ChatbotService {
@@ -36,6 +72,74 @@ export class ChatbotService {
       proPrice: getProConfig().monthlyPrice,
     });
     return this.geminiProvider.generateResponse(prompt, messages);
+  }
+
+  /**
+   * Cotización con foto: Gemini identifica el servicio y estima el precio;
+   * si SERCOM ya tiene servicios pagados en esa categoría, se agrega el
+   * precio promedio real como referencia.
+   */
+  async photoQuote(userId: string, file: MulterFile | undefined, note?: string) {
+    if (!file?.buffer?.length) throw new BadRequestException('Sube una foto del problema');
+    if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(file.mimetype)) {
+      throw new BadRequestException('La foto debe ser JPG, PNG, WEBP o HEIC');
+    }
+    if (file.size > MAX_PHOTO_BYTES) throw new BadRequestException('La foto pesa más de 6 MB');
+
+    const db = this.supabaseService.sbRaw;
+    const { count } = await db
+      .from('photo_quotes')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gt('created_at', new Date(Date.now() - 86400000).toISOString());
+    if ((count ?? 0) >= PHOTO_QUOTES_PER_DAY) {
+      throw new HttpException('Llegaste al límite de cotizaciones por hoy. Intenta mañana.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    const catalog = await this.catalog();
+    const quote = sanitizePhotoQuote(
+      await this.geminiProvider.analyzeImage(
+        buildPhotoQuotePrompt(catalog, note),
+        file.buffer.toString('base64'),
+        file.mimetype,
+      ),
+    );
+
+    // Solo se aceptan categoría y servicio que existan en el catálogo.
+    const categoryName = Object.keys(catalog).find((c) => this.normalize(c) === this.normalize(quote.category ?? ''));
+    const serviceName = categoryName
+      ? catalog[categoryName].find((s) => this.normalize(s) === this.normalize(quote.serviceType ?? ''))
+      : undefined;
+    quote.category = categoryName ?? null;
+    quote.serviceType = serviceName ?? null;
+
+    let market: { average: number; samples: number } | null = null;
+    if (categoryName) {
+      const { data: rows } = await db
+        .from('payments')
+        .select('service_price, services:service_id!inner(service_categories:category_id!inner(name))')
+        .in('status', ['held', 'released', 'disbursed'])
+        .eq('services.service_categories.name', categoryName)
+        .limit(200);
+      const prices = (rows ?? []).map((r: any) => Number(r.service_price)).filter((n) => n > 0);
+      if (prices.length >= 3) {
+        market = {
+          average: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length / 1000) * 1000,
+          samples: prices.length,
+        };
+      }
+    }
+
+    await db.from('photo_quotes').insert({
+      user_id: userId,
+      category: quote.category,
+      service: quote.serviceType,
+      price_min: quote.price_min,
+      price_max: quote.price_max,
+      urgent: quote.urgent,
+    });
+
+    return { ...quote, market_reference: market };
   }
 
   /** Categorías y servicios activos de la BD (caché de 10 minutos). */

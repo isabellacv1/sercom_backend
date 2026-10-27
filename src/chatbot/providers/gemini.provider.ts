@@ -68,13 +68,24 @@ export class GeminiProvider {
         'El asistente no está configurado todavía (falta GEMINI_API_KEY en el servidor).',
       );
     }
-    return this.callWithRetry(prompt, 0);
+    return this.callWithRetry(prompt, 0, (p) => this.buildSafeResponse(p));
   }
 
-  private async callWithRetry(
-    prompt: string,
+  /** Analiza una imagen con el prompt dado y devuelve el JSON tal cual. */
+  async analyzeImage(prompt: string, imageBase64: string, mimeType: string): Promise<any> {
+    if (!this.hasKey) {
+      throw new ServiceUnavailableException(
+        'El cotizador no está configurado todavía (falta GEMINI_API_KEY en el servidor).',
+      );
+    }
+    return this.callWithRetry([{ inlineData: { data: imageBase64, mimeType } }, { text: prompt }], 0, (p) => p);
+  }
+
+  private async callWithRetry<T>(
+    prompt: string | any[],
     attempt: number,
-  ): Promise<ChatbotResponseDto> {
+    parse: (parsed: any) => T,
+  ): Promise<T> {
     try {
       // Modo JSON: Gemini devuelve directamente un objeto válido.
       const model = this.genAI.getGenerativeModel({
@@ -89,7 +100,7 @@ export class GeminiProvider {
       );
 
       const parsed = this.extractAndParseJson(rawResponse);
-      return this.buildSafeResponse(parsed);
+      return parse(parsed);
     } catch (error: any) {
       // Modelo retirado o no disponible para esta llave. Google suele indicar
       // el reemplazo ("use models/xxx"): se prueba ese primero.
@@ -107,7 +118,7 @@ export class GeminiProvider {
           `[${this.model}] no disponible (${error?.message ?? error}). Probando ${this.models[this.modelIndex + 1]}...`,
         );
         this.modelIndex++;
-        return this.callWithRetry(prompt, 0);
+        return this.callWithRetry(prompt, 0, parse);
       }
 
       if (this.isAuthError(error)) {
@@ -127,7 +138,7 @@ export class GeminiProvider {
           `[${this.model}] Error temporal (${is503 ? '503' : '429'}). Reintento ${attempt + 1}/${MAX_RETRIES} en ${delayMs}ms...`,
         );
         await this.sleep(delayMs);
-        return this.callWithRetry(prompt, attempt + 1);
+        return this.callWithRetry(prompt, attempt + 1, parse);
       }
 
       if (is429 && this.isDailyQuotaError(error)) {

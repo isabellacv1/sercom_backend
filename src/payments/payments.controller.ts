@@ -21,6 +21,7 @@ import { PayoutAccountService } from './payout-account.service';
 import { PayoutAccountDto } from './dto/payout-account.dto';
 import { getFeeRates } from './fees';
 import { ApplyDiscountsDto } from './dto/apply-discounts.dto';
+import { SetWarrantyDto } from './dto/warranty.dto';
 
 type JwtUser = { sub: string };
 
@@ -115,6 +116,22 @@ export class PaymentsController {
     @Body() dto: PayoutAccountDto,
   ) {
     return this.payoutAccountService.upsert(user.sub, dto);
+  }
+
+  // ─── Garantía extendida ──────────────────────────────────────────────────
+
+  @Get('service/:serviceId/warranty')
+  warrantyQuote(@CurrentUser() user: JwtUser, @Param('serviceId') serviceId: string) {
+    return this.paymentsService.warrantyQuote(user.sub, serviceId);
+  }
+
+  @Post('service/:serviceId/warranty')
+  setWarranty(
+    @CurrentUser() user: JwtUser,
+    @Param('serviceId') serviceId: string,
+    @Body() dto: SetWarrantyDto,
+  ) {
+    return this.paymentsService.setWarranty(user.sub, serviceId, dto.enabled);
   }
 
   // ─── Cobro inmediato ─────────────────────────────────────────────────────

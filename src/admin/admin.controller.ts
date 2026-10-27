@@ -15,6 +15,11 @@ export class AdminController {
     return this.admin.overview();
   }
 
+  @Get('metrics')
+  metrics() {
+    return this.admin.metrics();
+  }
+
   @Get('credentials')
   credentials(@Query('status') status?: string) {
     return this.admin.credentials(status ?? 'pending');

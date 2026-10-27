@@ -32,6 +32,7 @@ import { CreditsService } from './credits.service';
 import { ReferralsService } from './referrals.service';
 import { ApplyDiscountsDto } from './dto/apply-discounts.dto';
 import { instantFee, instantPayoutConfig } from './instant-payout';
+import { getWarrantyConfig, warrantyPrice } from './warranty';
 import { GIFT_REFERENCE_PREFIX, GiftCardsService } from './gift-cards.service';
 import { AD_REFERENCE_PREFIX, AdsService } from './ads.service';
 
@@ -259,6 +260,76 @@ export class PaymentsService {
         amount_before_discount: base,
         amount_total: base - discount,
       },
+    };
+  }
+
+  // ─── Garantía extendida ─────────────────────────────────────────────────────
+
+  private async pendingPaymentFor(clientId: string, serviceId: string) {
+    const { data: payment, error } = await this.db
+      .from('payments')
+      .select('*')
+      .eq('service_id', serviceId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+    if (error) throw new InternalServerErrorException(error.message);
+    if (!payment) throw new NotFoundException('Pago no encontrado');
+    return payment;
+  }
+
+  async warrantyQuote(clientId: string, serviceId: string) {
+    const payment = await this.pendingPaymentFor(clientId, serviceId);
+    const config = getWarrantyConfig();
+    const base = Number(payment.service_price ?? payment.amount_total);
+    return {
+      enabled: Number(payment.warranty_amount ?? 0) > 0,
+      price: warrantyPrice(base),
+      days: config.days,
+      editable: payment.status === 'pending' || payment.status === 'failed',
+    };
+  }
+
+  /**
+   * Agrega o quita la garantía extendida antes de pagar. El valor es ingreso
+   * de SerCom (reserva para cubrir reclamos); el técnico recibe lo mismo.
+   */
+  async setWarranty(clientId: string, serviceId: string, enabled: boolean) {
+    const payment = await this.pendingPaymentFor(clientId, serviceId);
+    if (payment.status !== 'pending' && payment.status !== 'failed') {
+      throw new BadRequestException('La garantía se elige antes de pagar');
+    }
+    if (payment.provider_status === 'PENDING') {
+      throw new BadRequestException('Tienes un pago en proceso en Wompi. Espera a que termine.');
+    }
+
+    const current = Number(payment.warranty_amount ?? 0);
+    const target = enabled ? warrantyPrice(Number(payment.service_price ?? payment.amount_total)) : 0;
+    const delta = target - current;
+    const plus = (v: unknown) => (v == null ? null : Number(v) + delta);
+
+    const { data: updated, error } = await this.db
+      .from('payments')
+      .update({
+        warranty_amount: target,
+        warranty_days: enabled ? getWarrantyConfig().days : 0,
+        amount_total: Number(payment.amount_total) + delta,
+        commission_amount: Number(payment.commission_amount) + delta,
+        amount_before_discount: plus(payment.amount_before_discount),
+        commission_before_discount: plus(payment.commission_before_discount),
+        checkout_url: null,
+        checkout_reference: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', payment.id)
+      .select()
+      .single();
+    if (error) throw new InternalServerErrorException(error.message);
+
+    return {
+      message: enabled
+        ? `Garantía extendida agregada: ${getWarrantyConfig().days} días de cobertura`
+        : 'Garantía extendida quitada',
+      payment: updated,
     };
   }
 

@@ -53,10 +53,16 @@ export class SupportService {
 
       if (role === 'client' && service.status === 'completed') {
         const config = getPlusConfig();
-        const days = plus ? config.warrantyDays : config.standardWarrantyDays;
+        const { data: payment } = await this.db
+          .from('payments')
+          .select('warranty_days')
+          .eq('service_id', service.id)
+          .maybeSingle();
+        const extended = Number(payment?.warranty_days ?? 0);
+        const days = Math.max(plus ? config.warrantyDays : config.standardWarrantyDays, extended);
         if (!withinWarranty(service.completed_at, days)) {
           throw new BadRequestException(
-            plus
+            plus || extended > 0
               ? `Pasaron más de ${days} días desde el servicio. Escríbenos por el centro de ayuda.`
               : `La garantía para reportar es de ${days} días. Con SERCOM Plus son ${config.warrantyDays}.`,
           );

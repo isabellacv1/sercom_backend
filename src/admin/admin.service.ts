@@ -1,3 +1,4 @@
+import { PaidPaymentRow, paymentRevenue, repeatRate, weekly } from './metrics';
 import {
   ConflictException,
   Injectable,
@@ -63,6 +64,84 @@ export class AdminService {
       active_plus: activePlus,
       paid_services: paidServices,
       commission_revenue: revenue,
+    };
+  }
+
+  /** Métricas del MVP: ingresos por canal, embudo, recurrencia y unidad. */
+  async metrics() {
+    const paidStatuses = ['held', 'released', 'disbursed'];
+    const since = new Date(Date.now() - 8 * 7 * 86400000).toISOString();
+    const [payments, memberships, boosts, gifts, tips, services, proposals, photoQuotes] = await Promise.all([
+      this.db
+        .from('payments')
+        .select(
+          'client_id, worker_id, amount_total, amount_before_discount, commission_amount, commission_before_discount, worker_amount, service_price, client_fee_amount, worker_commission_amount, surcharge_amount, warranty_amount, coupon_discount, credit_applied, payout_fee, created_at',
+        )
+        .in('status', paidStatuses),
+      this.db.from('worker_memberships').select('plan, amount, period_end').eq('status', 'active'),
+      this.db.from('worker_boosts').select('amount').eq('status', 'active'),
+      this.db.from('gift_cards').select('amount, status').in('status', ['paid', 'redeemed']),
+      this.db.from('service_tips').select('amount, payout_fee').eq('status', 'paid'),
+      this.db.from('services').select('id, status, created_at'),
+      this.db.from('proposals').select('service_id'),
+      this.db.from('photo_quotes').select('id', { count: 'exact', head: true }),
+    ]);
+
+    const paid = (payments.data ?? []) as PaidPaymentRow[];
+    const revenue = paymentRevenue(paid);
+    const now = new Date().toISOString();
+    const sumBy = (rows: any[] | null, filter: (r: any) => boolean = () => true) =>
+      (rows ?? []).filter(filter).reduce((s, r) => s + Number(r.amount ?? 0), 0);
+    const mem = memberships.data ?? [];
+    const tipFees = (tips.data ?? []).reduce((s: number, t: any) => s + Number(t.payout_fee ?? 0), 0);
+
+    const channels = [
+      { key: 'client_fee', label: 'Tarifa de servicio (cliente)', amount: revenue.client_fees },
+      { key: 'worker_commission', label: 'Comisión del profesional', amount: revenue.worker_commissions },
+      { key: 'surcharge', label: 'Tarifa dinámica', amount: revenue.surcharge_share },
+      { key: 'warranty', label: 'Garantía extendida', amount: revenue.warranty },
+      { key: 'instant_payout', label: 'Cobro inmediato', amount: revenue.instant_fees + tipFees },
+      { key: 'pro', label: 'SERCOM Pro', amount: sumBy(mem, (m) => m.plan === 'pro') },
+      { key: 'plus', label: 'SERCOM Plus', amount: sumBy(mem, (m) => m.plan === 'plus') },
+      { key: 'care', label: 'Hogar Tranquilo', amount: sumBy(mem, (m) => m.plan === 'care') },
+      { key: 'ads', label: 'SERCOM Ads', amount: sumBy(boosts.data) },
+    ];
+    const gross = channels.reduce((s, c) => s + c.amount, 0);
+
+    const allServices = services.data ?? [];
+    const withProposal = new Set((proposals.data ?? []).map((p: any) => p.service_id));
+    const repeat = repeatRate(paid);
+
+    return {
+      revenue: {
+        gross,
+        discounts: revenue.discounts,
+        net: gross - revenue.discounts,
+        channels,
+      },
+      gmv: revenue.gmv,
+      paid_services: revenue.count,
+      per_service: revenue.per_service,
+      funnel: {
+        requested: allServices.length,
+        with_proposal: allServices.filter((s: any) => withProposal.has(s.id)).length,
+        paid: revenue.count,
+        completed: allServices.filter((s: any) => s.status === 'completed').length,
+      },
+      clients: repeat,
+      active_workers: new Set(paid.map((p) => p.worker_id)).size,
+      active_memberships: {
+        pro: mem.filter((m: any) => m.plan === 'pro' && m.period_end > now).length,
+        plus: mem.filter((m: any) => m.plan === 'plus' && m.period_end > now).length,
+        care: mem.filter((m: any) => m.plan === 'care' && m.period_end > now).length,
+      },
+      gift_cards_sold: sumBy(gifts.data),
+      tips_total: sumBy(tips.data),
+      photo_quotes: photoQuotes.count ?? 0,
+      weekly: {
+        requested: weekly(allServices.filter((s: any) => s.created_at >= since).map((s: any) => s.created_at)),
+        paid: weekly(paid.filter((p) => p.created_at >= since).map((p) => p.created_at)),
+      },
     };
   }
 
