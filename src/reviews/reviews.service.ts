@@ -154,10 +154,22 @@ export class ReviewsService {
       !!service.client_id &&
       !workerReviewResponse.data;
 
+    // Quién hizo el trabajo: el cliente puede guardarlo como favorito.
+    let worker: { id: string; full_name: string; profile_image_url: string | null } | null = null;
+    if (service.assigned_worker_id) {
+      const { data } = await this.supabaseService.client
+        .from('profiles')
+        .select('id, full_name, profile_image_url')
+        .eq('id', service.assigned_worker_id)
+        .maybeSingle();
+      worker = data ?? { id: service.assigned_worker_id, full_name: '', profile_image_url: null };
+    }
+
     return {
       review: reviewResponse.data,
       can_review: canReview,
       can_worker_review: canWorkerReview,
+      worker,
     };
   }
 
