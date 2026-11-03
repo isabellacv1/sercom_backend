@@ -345,6 +345,15 @@ export class ServicesService {
       updatePayload.completed_at = new Date().toISOString();
     }
 
+    if (nextStatus === 'on_the_way') {
+      // Base para estimar la llegada y avisar si el profesional se demora.
+      Object.assign(updatePayload, {
+        on_the_way_at: new Date().toISOString(),
+        expected_arrival_at: null,
+        late_notified_at: null,
+      });
+    }
+
     const updateResponse = await this.supabaseService.sb
       .from('services')
       .update(updatePayload)
