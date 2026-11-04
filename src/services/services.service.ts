@@ -1165,10 +1165,13 @@ export class ServicesService {
     const limit = Math.min(query.limit ?? 20, 50);
     const offset = (page - 1) * limit;
 
+    // Incluye al cliente (nombre, foto y calificación) para que el profesional
+    // sepa quién publicó la solicitud.
     const fullSelect = `
       *,
       category:service_categories(id, name, description, icon),
-      service_option:service_options(id, category_id, title, description, specialist_level)
+      service_option:service_options(id, category_id, title, description, specialist_level),
+      client:profiles!services_client_id_fkey(id, full_name, profile_image_url, rating_avg)
     `;
 
     const hasGeo =
