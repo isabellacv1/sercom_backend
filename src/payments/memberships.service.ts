@@ -17,6 +17,7 @@ import {
   isProWorker,
   proposalsThisMonth,
 } from '../memberships/pro';
+import { paymentRedirectUrl } from '../common/request-origin';
 
 /** pro = profesionales; plus = clientes (Rappi Prime); care = mantenimiento. */
 export type MembershipPlan = 'pro' | 'plus' | 'care';
@@ -184,7 +185,7 @@ export class MembershipsService {
       reference,
       amountInCents: monthlyPrice * 100,
       currency: 'COP',
-      redirectUrl: this.frontendUrl,
+      redirectUrl: paymentRedirectUrl(this.frontendUrl),
       customerEmail: profile.email,
       customerName: profile.full_name,
     });

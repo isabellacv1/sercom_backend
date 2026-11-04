@@ -15,6 +15,7 @@ import { WompiService, WompiTransaction } from './wompi.service';
 import { CreateTipDto } from './dto/create-tip.dto';
 import { CompletePayoutDto } from './dto/complete-payout.dto';
 import { instantFee } from './instant-payout';
+import { paymentRedirectUrl } from '../common/request-origin';
 
 /** Prefijo de las referencias Wompi de propinas. */
 export const TIP_REFERENCE_PREFIX = 'tip_';
@@ -116,7 +117,7 @@ export class TipsService {
       reference,
       amountInCents: dto.amount * 100,
       currency: 'COP',
-      redirectUrl: this.frontendUrl,
+      redirectUrl: paymentRedirectUrl(this.frontendUrl),
       customerEmail: client?.email,
       customerName: client?.full_name,
     });

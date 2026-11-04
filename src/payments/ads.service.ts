@@ -11,6 +11,7 @@ import { PushNotificationsService } from '../push-notifications/push-notificatio
 import { WompiService, WompiTransaction } from './wompi.service';
 import { BuyBoostDto } from './dto/gift-and-ads.dto';
 import { getBoostPrices } from '../memberships/ads';
+import { paymentRedirectUrl } from '../common/request-origin';
 
 export const AD_REFERENCE_PREFIX = 'ad_';
 
@@ -83,7 +84,7 @@ export class AdsService {
       reference,
       amountInCents: amount * 100,
       currency: 'COP',
-      redirectUrl: this.frontendUrl,
+      redirectUrl: paymentRedirectUrl(this.frontendUrl),
       customerEmail: profile?.email,
       customerName: profile?.full_name,
     });

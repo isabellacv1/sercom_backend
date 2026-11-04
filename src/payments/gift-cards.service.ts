@@ -13,6 +13,7 @@ import { PushNotificationsService } from '../push-notifications/push-notificatio
 import { WompiService, WompiTransaction } from './wompi.service';
 import { CreditsService } from './credits.service';
 import { BuyGiftCardDto } from './dto/gift-and-ads.dto';
+import { paymentRedirectUrl } from '../common/request-origin';
 
 export const GIFT_REFERENCE_PREFIX = 'gift_';
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -65,7 +66,7 @@ export class GiftCardsService {
       reference,
       amountInCents: dto.amount * 100,
       currency: 'COP',
-      redirectUrl: this.frontendUrl,
+      redirectUrl: paymentRedirectUrl(this.frontendUrl),
       customerEmail: buyer?.email,
       customerName: buyer?.full_name,
     });

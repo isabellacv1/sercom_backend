@@ -1,9 +1,11 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { requestOriginMiddleware } from './common/request-origin';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.use(requestOriginMiddleware);
 
   app.useGlobalPipes(
     new ValidationPipe({

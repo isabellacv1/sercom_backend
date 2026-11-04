@@ -35,6 +35,7 @@ import { instantFee, instantPayoutConfig } from './instant-payout';
 import { getWarrantyConfig, warrantyPrice } from './warranty';
 import { GIFT_REFERENCE_PREFIX, GiftCardsService } from './gift-cards.service';
 import { AD_REFERENCE_PREFIX, AdsService } from './ads.service';
+import { paymentRedirectUrl } from '../common/request-origin';
 
 /** Wompi necesita un cobro mínimo: los descuentos no bajan de aquí. */
 export const MIN_CHARGE = 2000;
@@ -139,7 +140,7 @@ export class PaymentsService {
       reference,
       amountInCents: this.toCents(payment.amount_total),
       currency: payment.currency ?? 'COP',
-      redirectUrl: this.frontendUrl || 'https://sercom-frontend.vercel.app',
+      redirectUrl: paymentRedirectUrl(this.frontendUrl || 'https://sercom-frontend.vercel.app'),
       customerEmail: clientProfile?.email,
       customerName: clientProfile?.full_name,
     });
