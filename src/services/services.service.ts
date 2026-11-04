@@ -12,7 +12,8 @@ import { ServiceEvidenceService } from './service-evidence.service';
 import { getProWorkerIds } from '../memberships/pro';
 import { getFeaturedWorkerIds, rankWorkers } from '../memberships/ads';
 import { LiveLocationService } from './live-location.service';
-import { RepeatService } from './repeat.service';
+import { RepeatService, RESERVATION_HOURS } from './repeat.service';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { normalizeAvailability } from './availability';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
@@ -33,6 +34,7 @@ export class ServicesService {
     private readonly evidenceService: ServiceEvidenceService,
     private readonly liveLocation: LiveLocationService,
     private readonly repeatService: RepeatService,
+    private readonly pushService: PushNotificationsService,
   ) {}
 
   /** Reservada para otro profesional (repetición) durante RESERVATION_HOURS. */
@@ -681,6 +683,25 @@ export class ServicesService {
     }
 
     const availability = normalizeAvailability(dto.availability);
+
+    // Pedido directo a un profesional guardado: debe ser un profesional
+    // publicado y distinto del cliente.
+    let preferredWorker: { id: string; full_name: string | null } | null = null;
+    if (dto.preferred_worker_id) {
+      if (dto.preferred_worker_id === clientId) {
+        throw new BadRequestException('No puedes pedirte un servicio a ti mismo');
+      }
+      const { data: worker } = await this.supabaseService.sbRaw
+        .from('profiles')
+        .select('id, full_name, roles')
+        .eq('id', dto.preferred_worker_id)
+        .maybeSingle();
+      if (!worker || !(Array.isArray(worker.roles) && worker.roles.includes('worker'))) {
+        throw new NotFoundException('Ese profesional ya no está disponible');
+      }
+      preferredWorker = { id: worker.id, full_name: worker.full_name };
+    }
+
     const row: Record<string, unknown> = {
       client_id: clientId,
       category_id: dto.category_id,
@@ -698,6 +719,10 @@ export class ServicesService {
       status: 'requested',
     };
     if (availability.length) row.availability = availability;
+    if (preferredWorker) {
+      row.preferred_worker_id = preferredWorker.id;
+      row.reserved_until = new Date(Date.now() + RESERVATION_HOURS * 3600000).toISOString();
+    }
 
     const insertService = (values: Record<string, unknown>) =>
       this.supabaseService.sb
@@ -752,6 +777,22 @@ export class ServicesService {
 
     if (historyError) {
       throw new InternalServerErrorException(historyError.message);
+    }
+
+    if (preferredWorker) {
+      const { data: client } = await this.supabaseService.sbRaw
+        .from('profiles')
+        .select('full_name')
+        .eq('id', clientId)
+        .maybeSingle();
+      const name = client?.full_name?.split(' ')[0] ?? 'Un cliente';
+      void this.pushService
+        .sendToUser(preferredWorker.id, {
+          title: `${name} quiere contratarte`,
+          body: `«${dto.title}». Tienes ${RESERVATION_HOURS} horas para enviar tu propuesta antes de que otros la vean.`,
+          data: { type: 'direct_request', service_id: String(data.id) },
+        })
+        .catch(() => undefined);
     }
 
     let candidateWorkers = { candidates: [] as any[] };

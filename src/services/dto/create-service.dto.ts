@@ -78,6 +78,14 @@ export class CreateServiceDto {
   @IsBoolean()
   is_urgent?: boolean;
 
+  /**
+   * Profesional al que el cliente le pide el servicio directamente (desde
+   * "Tus profesionales"). Tiene RESERVATION_HOURS de exclusividad.
+   */
+  @IsOptional()
+  @IsUUID()
+  preferred_worker_id?: string;
+
   /** Horarios del cliente (hasta 6). El profesional elige uno. */
   @IsOptional()
   @IsArray()
