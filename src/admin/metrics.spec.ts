@@ -69,6 +69,22 @@ describe('cotización con foto', () => {
     expect(q.tips).toEqual(['a']);
   });
 
+  it('el total suma mano de obra y materiales', () => {
+    const q = sanitizePhotoQuote({
+      labor_min: 60000,
+      labor_max: 90000,
+      materials: [
+        { name: 'Sifón PVC', price_min: 15000, price_max: 25000 },
+        { name: 'Cinta teflón', price_min: 2000, price_max: 3000 },
+        { name: '', price_min: 5000, price_max: 6000 },
+      ],
+    });
+    expect([q.labor_min, q.labor_max]).toEqual([60000, 90000]);
+    expect(q.materials.map((m) => m.name)).toEqual(['Sifón PVC', 'Cinta teflón']);
+    expect([q.materials_min, q.materials_max]).toEqual([17000, 28000]);
+    expect([q.price_min, q.price_max]).toEqual([77000, 118000]);
+  });
+
   it('si la foto no es del hogar no da precio ni categoría', () => {
     const q = sanitizePhotoQuote({ is_home_issue: false, category: 'Plomería', price_min: 50000 });
     expect(q.category).toBeNull();

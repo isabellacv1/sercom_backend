@@ -21,19 +21,46 @@ const CATALOG_TTL_MS = 10 * 60 * 1000;
 const PHOTO_QUOTES_PER_DAY = 15;
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
 
-/** Limpia la respuesta del modelo: precios enteros y razonables. */
-export function sanitizePhotoQuote(raw: any) {
+/** Rango [min, max] redondeado a miles, ordenado y dentro de límites. */
+function priceRange(rawMin: unknown, rawMax: unknown, floor: number, cap: number): [number, number] | null {
   const price = (v: unknown) => {
     const n = Math.round(Number(v) / 1000) * 1000;
-    return Number.isFinite(n) && n > 0 ? Math.min(Math.max(n, 20000), 5000000) : null;
+    return Number.isFinite(n) && n > 0 ? Math.min(Math.max(n, floor), cap) : null;
   };
-  let min = price(raw?.price_min);
-  let max = price(raw?.price_max);
+  let min = price(rawMin);
+  let max = price(rawMax);
   if (min && max && min > max) [min, max] = [max, min];
   if (min && !max) max = min;
   if (max && !min) min = max;
+  return min && max ? [min, max] : null;
+}
+
+/**
+ * Limpia la respuesta del modelo. El total (price_min/price_max, que se usa
+ * como presupuesto de la solicitud) = mano de obra + materiales.
+ */
+export function sanitizePhotoQuote(raw: any) {
   const text = (v: unknown, len: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, len) : null);
   const isHome = raw?.is_home_issue !== false;
+
+  // Versiones anteriores del prompt solo traían price_min/price_max (mano de obra).
+  const labor = isHome
+    ? priceRange(raw?.labor_min ?? raw?.price_min, raw?.labor_max ?? raw?.price_max, 20000, 5000000)
+    : null;
+
+  const materials = isHome && Array.isArray(raw?.materials)
+    ? raw.materials
+        .map((m: any) => {
+          const name = text(m?.name, 60);
+          const range = priceRange(m?.price_min, m?.price_max, 1000, 3000000);
+          return name && range ? { name, price_min: range[0], price_max: range[1] } : null;
+        })
+        .filter(Boolean)
+        .slice(0, 6)
+    : [];
+  const materialsMin = materials.reduce((s: number, m: any) => s + m.price_min, 0);
+  const materialsMax = materials.reduce((s: number, m: any) => s + m.price_max, 0);
+
   return {
     is_home_issue: isHome,
     category: isHome ? text(raw?.category, 80) : null,
@@ -41,8 +68,14 @@ export function sanitizePhotoQuote(raw: any) {
     title: text(raw?.title, 80),
     diagnosis: text(raw?.diagnosis, 400),
     description: text(raw?.description, 500),
-    price_min: isHome ? min : null,
-    price_max: isHome ? max : null,
+    labor_min: labor ? labor[0] : null,
+    labor_max: labor ? labor[1] : null,
+    materials: materials as { name: string; price_min: number; price_max: number }[],
+    materials_min: materials.length ? materialsMin : 0,
+    materials_max: materials.length ? materialsMax : 0,
+    materials_note: isHome ? text(raw?.materials_note, 200) : null,
+    price_min: labor ? labor[0] + materialsMin : null,
+    price_max: labor ? labor[1] + materialsMax : null,
     urgent: raw?.urgent === true,
     safety_warning: text(raw?.safety_warning, 300),
     tips: Array.isArray(raw?.tips) ? raw.tips.filter((t: unknown) => typeof t === 'string').slice(0, 4) : [],

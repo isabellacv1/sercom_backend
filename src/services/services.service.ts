@@ -14,6 +14,7 @@ import { getFeaturedWorkerIds, rankWorkers } from '../memberships/ads';
 import { LiveLocationService } from './live-location.service';
 import { RepeatService } from './repeat.service';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { normalizeAvailability } from './availability';
 import { CreatePreServiceRequestDto } from './dto/create-pre-service-request.dto';
 import { UpdatePreServiceRequestDetailsDto } from './dto/update-pre-service-request-details.dto';
 import { FindOpportunitiesQueryDto } from './dto/find-opportunities-query.dto';
@@ -679,32 +680,51 @@ export class ServicesService {
       );
     }
 
-    const createResponse = await this.supabaseService.sb
-      .from('services')
-      .insert({
-        client_id: clientId,
-        category_id: dto.category_id,
-        service_option_id: dto.service_option_id,
-        title: dto.title,
-        description: dto.description,
-        address: dto.address,
-        city: dto.city ?? null,
-        latitude: dto.latitude ?? null,
-        longitude: dto.longitude ?? null,
-        budget_min: dto.budget_min ?? null,
-        budget_max: dto.budget_max ?? null,
-        scheduled_at: dto.scheduled_at ?? null,
-        is_urgent: dto.is_urgent ?? false,
-        status: 'requested',
-      } as any)
-      .select(
-        `
+    const availability = normalizeAvailability(dto.availability);
+    const row: Record<string, unknown> = {
+      client_id: clientId,
+      category_id: dto.category_id,
+      service_option_id: dto.service_option_id,
+      title: dto.title,
+      description: dto.description,
+      address: dto.address,
+      city: dto.city ?? null,
+      latitude: dto.latitude ?? null,
+      longitude: dto.longitude ?? null,
+      budget_min: dto.budget_min ?? null,
+      budget_max: dto.budget_max ?? null,
+      scheduled_at: dto.scheduled_at ?? null,
+      is_urgent: dto.is_urgent ?? false,
+      status: 'requested',
+    };
+    if (availability.length) row.availability = availability;
+
+    const insertService = (values: Record<string, unknown>) =>
+      this.supabaseService.sb
+        .from('services')
+        .insert(values as any)
+        .select(
+          `
         *,
         category:service_categories(id, name, description, icon),
         service_option:service_options(id, category_id, title, description, specialist_level)
       `,
-      )
-      .single();
+        )
+        .single();
+
+    let createResponse = await insertService(row);
+    // Si aún no se corrió la migración de horarios, se crea igual sin ellos.
+    if (
+      createResponse.error &&
+      'availability' in row &&
+      /availability/i.test(createResponse.error.message)
+    ) {
+      this.logger.warn(
+        'Falta la columna services.availability: servicio creado sin horarios',
+      );
+      delete row.availability;
+      createResponse = await insertService(row);
+    }
 
     const data = createResponse.data;
     const error = createResponse.error;
@@ -1065,12 +1085,12 @@ export class ServicesService {
       .maybeSingle();
 
     if (svcErr) throw new InternalServerErrorException(svcErr.message);
-    if (!service) throw new NotFoundException('Misión no encontrada');
+    if (!service) throw new NotFoundException('Servicio no encontrado');
 
     const nonCancellable: ServiceStatus[] = ['cancelled', 'on_the_way', 'in_progress', 'completed'];
     if (nonCancellable.includes(service.status)) {
       throw new BadRequestException(
-        `No se puede cancelar una misión en estado "${this.getStatusLabel(service.status)}"`,
+        `No se puede cancelar un servicio en estado "${this.getStatusLabel(service.status)}"`,
       );
     }
 
@@ -1117,8 +1137,8 @@ export class ServicesService {
       service: updated,
       penaltyApplied,
       message: penaltyApplied
-        ? 'Misión cancelada. Se aplicará una sanción por cancelación tardía.'
-        : 'Misión cancelada exitosamente.',
+        ? 'Servicio cancelado. Se aplicará una sanción por cancelación tardía.'
+        : 'Servicio cancelado.',
     };
   }
 

@@ -1,4 +1,7 @@
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsNotEmpty,
@@ -6,8 +9,24 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Un horario en que el cliente puede recibir al profesional. */
+export class AvailabilitySlotDto {
+  @IsDateString()
+  date: string;
+
+  @Matches(HHMM, { message: 'from debe tener el formato HH:mm' })
+  from: string;
+
+  @Matches(HHMM, { message: 'to debe tener el formato HH:mm' })
+  to: string;
+}
 
 export class CreateServiceDto {
   @IsUUID()
@@ -58,4 +77,12 @@ export class CreateServiceDto {
   @IsOptional()
   @IsBoolean()
   is_urgent?: boolean;
+
+  /** Horarios del cliente (hasta 6). El profesional elige uno. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @ValidateNested({ each: true })
+  @Type(() => AvailabilitySlotDto)
+  availability?: AvailabilitySlotDto[];
 }

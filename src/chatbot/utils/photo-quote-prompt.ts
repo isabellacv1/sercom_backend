@@ -11,7 +11,10 @@ Catálogo (categoría: servicios). Usa los nombres EXACTOS:
 ${lines}
 
 Reglas:
-- Precio en pesos colombianos de mano de obra en Cali en 2026 (sin materiales costosos). Da un rango realista y no muy amplio.
+- Separa mano de obra y materiales, en pesos colombianos de Cali en 2026:
+  - "labor_min"/"labor_max": solo la mano de obra del profesional. Rango realista y no muy amplio.
+  - "materials": repuestos o insumos que probablemente hay que comprar para este arreglo (máx. 5), cada uno con su rango de precio en ferreterías de Cali. No incluyas herramientas del profesional. Si no se necesita nada, deja la lista vacía.
+  - "materials_note": una frase corta sobre los materiales (p. ej. "El precio depende de la marca de la grifería"), o null.
 - Si la foto no muestra un problema del hogar (selfie, paisaje, documento, etc.), pon "is_home_issue": false y deja categoría y precios en null.
 - Si ves riesgo (cables expuestos, olor a gas, agua cerca de electricidad, estructura dañada), explica qué hacer en "safety_warning" y marca "urgent": true.
 - Escribe en español de Colombia, claro y cercano. No inventes marcas ni detalles que no se vean.
@@ -24,8 +27,10 @@ Responde SOLO con este JSON:
   "title": "título corto de la solicitud",
   "diagnosis": "1 o 2 frases sobre lo que ves",
   "description": "texto para publicar la solicitud, en primera persona del cliente (máx. 400 caracteres)",
-  "price_min": 0,
-  "price_max": 0,
+  "labor_min": 0,
+  "labor_max": 0,
+  "materials": [{ "name": "repuesto o insumo", "price_min": 0, "price_max": 0 }],
+  "materials_note": null,
   "urgent": false,
   "safety_warning": null,
   "tips": ["consejo corto", "otro consejo"],
