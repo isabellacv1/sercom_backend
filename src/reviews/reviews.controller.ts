@@ -54,4 +54,11 @@ export class ReviewsController {
   ) {
     return this.reviewsService.findByWorker(workerId, user.sub);
   }
+
+  // GET /clients/:clientId/reviews — reseñas de profesionales sobre el cliente
+  @Auth()
+  @Get('clients/:clientId/reviews')
+  findByClient(@Param('clientId', ParseUUIDPipe) clientId: string) {
+    return this.reviewsService.findByClient(clientId);
+  }
 }

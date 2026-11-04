@@ -323,6 +323,53 @@ export class ReviewsService {
     };
   }
 
+  /**
+   * Reseñas que los profesionales le dejaron a un cliente (trabajador →
+   * cliente). Las ven los profesionales antes de postularse.
+   */
+  async findByClient(clientId: string) {
+    const reviewsResponse = await this.supabaseService.client
+      .from('reviews')
+      .select(
+        `
+        id,
+        service_id,
+        rating,
+        comment,
+        created_at,
+        worker_id,
+        reviewer:profiles!reviews_worker_id_fkey (
+          id,
+          full_name,
+          profile_image_url
+        ),
+        service:services!reviews_service_id_fkey (
+          id,
+          title
+        )
+      `,
+      )
+      .eq('client_id', clientId)
+      // Solo las que escribió el profesional: reviewer_id distinto del cliente
+      // (las filas viejas con reviewer_id NULL son del cliente y se excluyen).
+      .or(`reviewer_id.neq.${clientId}`)
+      .order('created_at', { ascending: false });
+
+    if (reviewsResponse.error) {
+      throw new InternalServerErrorException(reviewsResponse.error.message);
+    }
+
+    const reviews = (reviewsResponse.data ?? []) as { rating: number | null }[];
+    const ratings = reviews.map((r) => Number(r.rating ?? 0)).filter((n) => n > 0);
+    const avg = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
+
+    return {
+      rating_avg: Math.round(avg * 10) / 10,
+      rating_count: ratings.length,
+      reviews,
+    };
+  }
+
   private async refreshWorkerRatingAggregates(workerId: string) {
     const statsResponse = await this.reviewsTable
       .select('rating')
