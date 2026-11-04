@@ -300,8 +300,11 @@ export class GeminiProvider {
       category: typeof raw.category === 'string' ? raw.category.trim() : '',
       serviceType:
         typeof raw.serviceType === 'string' ? raw.serviceType.trim() : '',
+      // El formulario y CreateServiceDto aceptan hasta 500 caracteres.
       description:
-        typeof raw.description === 'string' ? raw.description.trim() : '',
+        typeof raw.description === 'string'
+          ? raw.description.trim().slice(0, 500)
+          : '',
       location: typeof raw.location === 'string' ? raw.location.trim() : '',
       urgent: raw.urgent === true,
     };
