@@ -969,10 +969,12 @@ export class ServicesService {
   }
 
   async findMissions(statusFilter: string, userId: string): Promise<any[]> {
+    // Con el cliente (nombre, foto y calificación) para "Publicado por".
     let query = this.supabaseService.sb.from('services').select(`
       *,
       category:service_categories(id, name, description, icon),
-      proposals:proposals(count)
+      proposals:proposals(count),
+      client:profiles!services_client_id_fkey(id, full_name, profile_image_url, rating_avg)
     `);
 
     if (statusFilter === 'in_progress') {
